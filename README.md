@@ -1,8 +1,9 @@
 # 🏗️ 4D BIM Viewer — Client Demo MVP
 
 A professional browser-based 4D BIM Viewer for construction progress visualization, designed as a client demonstration platform.
+Test the live viewer here:
 
-![4D BIM Viewer](https://via.placeholder.com/1200x600/0D1117/2F6BFF?text=4D+BIM+VIEWER+MVP)
+![4D BIM Viewer](https://bim-4d-viewer.vercel.app/)
 
 ## 🚀 Quick Start
 
