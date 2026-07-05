@@ -3,7 +3,7 @@
 A professional browser-based 4D BIM Viewer for construction progress visualization, designed as a client demonstration platform.
 Test the live viewer here:
 
-![4D BIM Viewer](https://bim-4d-viewer.vercel.app/)
+(https://bim-4d-viewer.vercel.app/)
 
 ## 🚀 Quick Start
 
