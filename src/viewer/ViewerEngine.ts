@@ -1,13 +1,3 @@
-/**
- * ViewerEngine — That Open Engine v3.x
- *
- * Fix: onModelLoaded is called AFTER extractObjects resolves in
- * IFCParserService — ViewerEngine.loadIFC no longer calls
- * onModelLoaded itself. Instead it returns the model and lets
- * IFCParserService call setIFCObjects + setModelLoadState in the
- * correct order, ensuring the UI count is never 0.
- */
-
 import * as THREE from 'three'
 import * as OBC from '@thatopen/components'
 import * as FRAGS from '@thatopen/fragments'
@@ -21,14 +11,20 @@ export interface ViewerEngineConfig {
   onError:        (message: string) => void
 }
 
+interface RaycastResult {
+  localId:  number
+  distance: number
+  point:    THREE.Vector3
+}
+
 interface FragmentsModelInternal {
   getLocalIds():                     Promise<number[]>
   getGuidsByLocalIds(ids: number[]): Promise<(string | null)[]>
   raycast(params: {
     camera: THREE.PerspectiveCamera | THREE.OrthographicCamera
     mouse:  THREE.Vector2
-    dom:    HTMLElement
-  }): Promise<{ localId: number } | null>
+    dom:    HTMLCanvasElement
+  }): Promise<RaycastResult | null>
 }
 
 export class ViewerEngine {
@@ -163,8 +159,44 @@ export class ViewerEngine {
   }
 
   // ────────────────────────────────────────────────────────
-  // Camera fit — uses fitToBox() which is the correct
-  // camera-controls API in OBC v3.x
+  // Unloads every currently loaded model and frees all
+  // associated GPU and worker resources.
+  //
+  // model.dispose() is the canonical That Open Engine API:
+  //   - Terminates the worker thread slot for this model
+  //   - Frees shared MaterialManager entries
+  //   - Removes model.object from its parent (the scene)
+  //   - Disposes tile mesh geometries
+  //
+  // Called automatically at the top of loadIFC() so that
+  // loading a second IFC always starts from a clean scene.
+  // Also exposed publicly so callers (IFCUploadZone, Layout)
+  // can clear the scene before showing the upload UI.
+  // ────────────────────────────────────────────────────────
+  async unloadAll(): Promise<void> {
+    if (this.loadedModels.length === 0) return
+
+    const toDispose = [...this.loadedModels]
+    this.loadedModels = []
+
+    for (const model of toDispose) {
+      try {
+        await model.dispose()
+      } catch (err) {
+        // Dispose errors are non-critical — log and continue
+        console.warn('[ViewerEngine] model.dispose() error:', err)
+        // Fallback: manually remove from scene if dispose() failed
+        try {
+          this.world.scene.three.remove(model.object)
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────────────────
+  // Camera fit
   // ────────────────────────────────────────────────────────
   private async fitCameraToModel(model: FRAGS.FragmentsModel): Promise<void> {
     try {
@@ -183,13 +215,11 @@ export class ViewerEngine {
       box.getSize(size)
       box.getCenter(center)
 
-      // Move grid to model base
       const gridY = box.min.y
       this.world.scene.three.children
         .filter(c => c instanceof THREE.GridHelper)
         .forEach(grid => { grid.position.y = gridY })
 
-      // Reposition sun light relative to model
       const maxDim = Math.max(size.x, size.y, size.z)
       this.world.scene.three.children
         .filter((c): c is THREE.DirectionalLight =>
@@ -224,6 +254,12 @@ export class ViewerEngine {
     }
   }
 
+  // ────────────────────────────────────────────────────────
+  // Click handler
+  // mouse carries raw client coordinates (e.clientX / e.clientY).
+  // The Fragments library's screenToCast() calls getBoundingClientRect()
+  // on the canvas and converts to NDC internally.
+  // ────────────────────────────────────────────────────────
   private handleClick = async (e: MouseEvent): Promise<void> => {
     if (!this.world || !this.fragmentsManager?.initialized) return
     if (this.loadedModels.length === 0) return
@@ -232,32 +268,52 @@ export class ViewerEngine {
     const domElement = this.world.renderer?.three?.domElement
     if (!domElement) return
 
+    const mouse = new THREE.Vector2(e.clientX, e.clientY)
+
     try {
-      const rect  = this.config.container.getBoundingClientRect()
-      const mouse = new THREE.Vector2(
-        e.clientX - rect.left,
-        e.clientY - rect.top
-      )
+      const candidates: Array<{ globalId: string; distance: number }> = []
 
-      for (const model of this.loadedModels) {
-        const internal = model as unknown as FragmentsModelInternal
-        const result   = await internal.raycast({
-          camera: this.world.camera.three as THREE.PerspectiveCamera,
-          mouse,
-          dom:    domElement,
-        })
+      await Promise.all(
+        this.loadedModels.map(async (model) => {
+          const internal = model as unknown as FragmentsModelInternal
+          let result: RaycastResult | null = null
 
-        if (result && result.localId !== undefined) {
-          const guids    = await internal.getGuidsByLocalIds([result.localId])
-          const globalId = guids[0]
-          if (typeof globalId === 'string' && globalId.length > 0) {
-            this.config.onObjectPicked(globalId, isMulti)
+          try {
+            result = await internal.raycast({
+              camera: this.world.camera.three as THREE.PerspectiveCamera,
+              mouse,
+              dom:    domElement as HTMLCanvasElement,
+            })
+          } catch {
             return
           }
-        }
+
+          if (!result || result.localId === undefined) return
+
+          let guids: (string | null)[] = []
+          try {
+            guids = await internal.getGuidsByLocalIds([result.localId])
+          } catch {
+            return
+          }
+
+          const globalId = guids[0]
+          if (typeof globalId !== 'string' || globalId.length === 0) return
+
+          candidates.push({
+            globalId,
+            distance: result.distance ?? Infinity,
+          })
+        })
+      )
+
+      if (candidates.length === 0) {
+        this.config.onObjectPicked(null, false)
+        return
       }
 
-      this.config.onObjectPicked(null, false)
+      candidates.sort((a, b) => a.distance - b.distance)
+      this.config.onObjectPicked(candidates[0].globalId, isMulti)
 
     } catch {
       this.config.onObjectPicked(null, false)
@@ -265,9 +321,9 @@ export class ViewerEngine {
   }
 
   /**
-   * Loads an IFC buffer, adds it to the scene, fits the camera.
+   * Unloads any existing model, then loads the given IFC buffer.
    * Does NOT call onModelLoaded — that is done by IFCParserService
-   * after extractObjects() completes, ensuring count is correct.
+   * after extractObjects() completes, ensuring count is never 0.
    */
   async loadIFC(
     buffer:   Uint8Array,
@@ -279,14 +335,13 @@ export class ViewerEngine {
       )
     }
 
+    // Always start from a clean scene — dispose previous model first
+    await this.unloadAll()
+
     try {
       const model = await this.ifcLoader.load(buffer, true, fileName)
-
-      // Fit camera to the loaded model
       await this.fitCameraToModel(model)
-
       return model
-
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to parse IFC file'
       this.config.onError(msg)

@@ -6,14 +6,17 @@ import { formatDisplayDate } from '../utils/date.utils'
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
 export default function TimelineSlider() {
-  const progress         = useSimulationStore(s => s.progress)
-  const currentDate      = useSimulationStore(s => s.currentDate)
-  const isPlaying        = useSimulationStore(s => s.isPlaying)
-  const setProgress      = useSimulationStore(s => s.setProgress)
-  const setPlaying       = useSimulationStore(s => s.setPlaying)
-  const tick             = useSimulationStore(s => s.tick)
-  const computeAllFrames = useSimulationStore(s => s.computeAllFrames)
-  const activities       = useActivityStore(s => s.activities)
+  const progress             = useSimulationStore(s => s.progress)
+  const currentDate          = useSimulationStore(s => s.currentDate)
+  const isPlaying            = useSimulationStore(s => s.isPlaying)
+  const isSimulationActive   = useSimulationStore(s => s.isSimulationActive)
+  const setProgress          = useSimulationStore(s => s.setProgress)
+  const setPlaying           = useSimulationStore(s => s.setPlaying)
+  const activateSimulation   = useSimulationStore(s => s.activateSimulation)
+  const deactivateSimulation = useSimulationStore(s => s.deactivateSimulation)
+  const tick                 = useSimulationStore(s => s.tick)
+  const computeAllFrames     = useSimulationStore(s => s.computeAllFrames)
+  const activities           = useActivityStore(s => s.activities)
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -32,14 +35,51 @@ export default function TimelineSlider() {
   const counts = { completed: 0, active: 0, future: 0 }
   frames.forEach(frame => { counts[frame.status]++ })
 
+  // ── Handlers ─────────────────────────────────────────────
+
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      // Pause: stop auto-advance but keep simulation colors visible
+      setPlaying(false)
+    } else {
+      // Play: activate simulation + start auto-advance
+      // setPlaying(true) in the store also sets isSimulationActive = true
+      setPlaying(true)
+    }
+  }
+
+  const handleReset = () => {
+    // Stop playback and deactivate simulation — restores original IFC materials
+    deactivateSimulation()
+    setProgress(0)
+  }
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Dragging the slider = user is exploring the timeline = simulation is active
+    setPlaying(false)
+    activateSimulation()
+    setProgress(Number(e.target.value))
+  }
+
   return (
     <div className="timeline-panel">
       <div className="timeline-top">
         <span className="timeline-label">4D Timeline Control</span>
 
+        {/* Reset button — returns to original IFC appearance */}
+        <button
+          className="play-btn"
+          onClick={handleReset}
+          title="Reset simulation — restore original IFC colors"
+          style={{ fontSize: 14, opacity: isSimulationActive ? 1 : 0.4 }}
+        >
+          ⏮
+        </button>
+
+        {/* Play / Pause button */}
         <button
           className={`play-btn${isPlaying ? ' playing' : ''}`}
-          onClick={() => setPlaying(!isPlaying)}
+          onClick={handlePlayPause}
           title={isPlaying ? 'Pause simulation' : 'Play simulation'}
         >
           {isPlaying ? '⏸' : '▶'}
@@ -55,10 +95,7 @@ export default function TimelineSlider() {
               min={0}
               max={100}
               value={progress}
-              onChange={e => {
-                setPlaying(false)
-                setProgress(Number(e.target.value))
-              }}
+              onChange={handleSliderChange}
             />
           </div>
           <div className="timeline-months">
@@ -87,10 +124,18 @@ export default function TimelineSlider() {
             <span className="timeline-pill__count" style={{ color: '#B0B0B0' }}>{counts.future}</span>
           </div>
           <div className="timeline-pill" style={{ marginLeft: 'auto' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Progress</span>
-            <span className="timeline-pill__count" style={{ color: 'var(--accent-blue)' }}>
-              {Math.round(progress)}%
-            </span>
+            {isSimulationActive ? (
+              <>
+                <span style={{ color: 'var(--text-secondary)' }}>Progress</span>
+                <span className="timeline-pill__count" style={{ color: 'var(--accent-blue)' }}>
+                  {Math.round(progress)}%
+                </span>
+              </>
+            ) : (
+              <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                IFC original colors active
+              </span>
+            )}
           </div>
         </div>
       </div>

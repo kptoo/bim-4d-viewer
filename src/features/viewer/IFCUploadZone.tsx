@@ -1,12 +1,8 @@
-/**
- * IFCUploadZone — Drag-and-drop or click-to-upload IFC file UI.
- *
- * Fix: call setIFCObjects with the parsed result BEFORE setModelLoadState('loaded')
- * so the UI reads the correct count on first render after load.
- */
-
 import { useRef, useState, useCallback, type DragEvent } from 'react'
 import { useViewerStore } from '../../store/viewer.store'
+import { useSelectionStore } from '../../store/selection.store'
+import { useSimulationStore } from '../../store/simulation.store'
+import { useLayerStore } from '../../store/layer.store'
 import { IFCParserService } from '../../services/ifc/IFCParserService'
 import type { ViewerEngine } from '../../viewer/ViewerEngine'
 
@@ -15,17 +11,23 @@ interface IFCUploadZoneProps {
 }
 
 export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
-  const inputRef               = useRef<HTMLInputElement>(null)
+  const inputRef                    = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const setModelLoadState = useViewerStore(s => s.setModelLoadState)
-  const setModelError     = useViewerStore(s => s.setModelError)
-  const setIFCObjects     = useViewerStore(s => s.setIFCObjects)
-  const setModelMeta      = useViewerStore(s => s.setModelMeta)
-  const modelLoadState    = useViewerStore(s => s.modelLoadState)
-  const modelError        = useViewerStore(s => s.modelError)
-  const sceneReady        = useViewerStore(s => s.sceneReady)
-  const resetModel        = useViewerStore(s => s.resetModel)
+  // Viewer store
+  const setModelLoadState   = useViewerStore(s => s.setModelLoadState)
+  const setModelError       = useViewerStore(s => s.setModelError)
+  const setIFCObjects       = useViewerStore(s => s.setIFCObjects)
+  const setModelMeta        = useViewerStore(s => s.setModelMeta)
+  const modelLoadState      = useViewerStore(s => s.modelLoadState)
+  const modelError          = useViewerStore(s => s.modelError)
+  const sceneReady          = useViewerStore(s => s.sceneReady)
+  const resetModel          = useViewerStore(s => s.resetModel)
+
+  // Cross-store cleanup for model replacement
+  const clearSelection       = useSelectionStore(s => s.clearSelection)
+  const deactivateSimulation = useSimulationStore(s => s.deactivateSimulation)
+  const clearLayerFilters    = useLayerStore(s => s.clearFilters)
 
   const handleFile = useCallback(async (file: File) => {
     if (!viewerEngine || !sceneReady) {
@@ -34,11 +36,30 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
       return
     }
 
-    // Set loading state first
+    // ── Step 1: Unload the previous 3D model ─────────────────
+    // model.dispose() frees the worker thread slot, shared
+    // MaterialManager entries, GPU tile geometry, and removes
+    // model.object from the Three.js scene.
+    // Must happen before store resets so colour/selection effects
+    // that read loadedModels do not fire against stale data.
+    try {
+      await viewerEngine.unloadAll()
+    } catch (err) {
+      console.warn('[IFCUploadZone] unloadAll warning:', err)
+      // Non-fatal — proceed with load
+    }
+
+    // ── Step 2: Clear all application state ──────────────────
+    clearSelection()          // Inspector empties, Gantt deselects
+    deactivateSimulation()    // Removes simulation colour overlay
+    clearLayerFilters()       // Resets layer filter panel
+
+    // ── Step 3: Transition to loading state ──────────────────
     setModelLoadState('loading')
     setModelError(null)
     setModelMeta(file.name, file.size)
 
+    // ── Step 4: Parse and load ────────────────────────────────
     const parser = new IFCParserService(viewerEngine)
     const result = await parser.parseFile(file)
 
@@ -49,8 +70,8 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
     }
 
     // IMPORTANT: set ifcObjects BEFORE setting modelLoadState to 'loaded'
-    // so that any component reading ifcObjects.length on state change
-    // already has the correct value
+    // so any component reading ifcObjects.length on state change
+    // already has the correct value.
     setIFCObjects(result.ifcObjects)
     setModelLoadState('loaded')
 
@@ -58,7 +79,17 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
       console.warn('[IFCUploadZone] Partial success:', result.error)
     }
 
-  }, [viewerEngine, sceneReady, setModelLoadState, setModelError, setModelMeta, setIFCObjects])
+  }, [
+    viewerEngine,
+    sceneReady,
+    setModelLoadState,
+    setModelError,
+    setModelMeta,
+    setIFCObjects,
+    clearSelection,
+    deactivateSimulation,
+    clearLayerFilters,
+  ])
 
   const handleDragOver  = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
