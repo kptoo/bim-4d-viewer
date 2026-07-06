@@ -1,263 +1,267 @@
-import { useEffect, useRef, useCallback } from 'react'
-import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { useBIMStore } from '../state/bimStore'
+/**
+ * IFCViewer — React wrapper for ViewerEngine.
+ * Fix: only show upload zone when modelLoadState is 'idle'.
+ * Fix: only show error overlay when modelLoadState is 'error'.
+ * Fix: never show upload zone before sceneReady.
+ */
 
-const STATUS_COLORS = {
-  future:    0xB0B0B0,
-  active:    0x2F6BFF,
-  completed: 0x2ECC71,
-  selected:  0xFFD700,
-}
-
-type GeomSpec = { w: number; h: number; d: number }
-
-function geomForType(type: string): GeomSpec {
-  switch (type) {
-    case 'IfcWall':         return { w: 0.2,  h: 3.0, d: 4.0 }
-    case 'IfcSlab':         return { w: 4.0,  h: 0.2, d: 4.0 }
-    case 'IfcColumn':       return { w: 0.4,  h: 4.0, d: 0.4 }
-    case 'IfcBeam':         return { w: 4.0,  h: 0.35, d: 0.35 }
-    case 'IfcStair':        return { w: 1.8,  h: 2.0, d: 2.0 }
-    case 'IfcFlowSegment':  return { w: 0.25, h: 0.25, d: 3.0 }
-    case 'IfcCurtainWall':  return { w: 0.15, h: 3.5, d: 5.0 }
-    case 'IfcCovering':     return { w: 3.5,  h: 0.1, d: 3.5 }
-    default:                return { w: 1.0,  h: 1.0, d: 1.0 }
-  }
-}
-
-const POSITIONS: [number, number, number][] = [
-  [-6, 0, -4], [0, 0, -4], [6, 0, -4],
-  [-6, 0,  0], [0, 0,  0], [6, 0,  0],
-  [-6, 0,  4], [0, 0,  4], [6, 0,  4],
-  [-3, 0,  8], [3, 0,  8], [0, 0, -9],
-]
+import { useEffect, useRef } from 'react'
+import { ViewerEngine } from '../viewer/ViewerEngine'
+import { useViewerStore } from '../store/viewer.store'
+import { useSelectionStore } from '../store/selection.store'
+import { useSimulationStore } from '../store/simulation.store'
+import { useActivityStore } from '../store/activity.store'
+import { useUIStore } from '../store/ui.store'
+import IFCUploadZone from '../features/viewer/IFCUploadZone'
 
 export default function IFCViewer() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const rendererRef  = useRef<THREE.WebGLRenderer | null>(null)
-  const sceneRef     = useRef<THREE.Scene | null>(null)
-  const cameraRef    = useRef<THREE.PerspectiveCamera | null>(null)
-  const controlsRef  = useRef<OrbitControls | null>(null)
-  const meshMapRef   = useRef<Map<string, THREE.Mesh>>(new Map())
-  const frameRef     = useRef<number>(0)
+  const engineRef    = useRef<ViewerEngine | null>(null)
 
-  const elements         = useBIMStore(s => s.ifcElements)
-  const selectedIFCId    = useBIMStore(s => s.selectedIFCId)
-  const timelineProgress = useBIMStore(s => s.timelineProgress)
-  const getElementStatus = useBIMStore(s => s.getElementStatus)
-  const setSelectedIFCId = useBIMStore(s => s.setSelectedIFCId)
+  // ── Store reads ──────────────────────────────────────────
+  const ifcObjects        = useViewerStore(s => s.ifcObjects)
+  const modelLoadState    = useViewerStore(s => s.modelLoadState)
+  const sceneReady        = useViewerStore(s => s.sceneReady)
+  const setSceneReady     = useViewerStore(s => s.setSceneReady)
+  const setModelLoadState = useViewerStore(s => s.setModelLoadState)
+  const setModelError     = useViewerStore(s => s.setModelError)
+  const resetModel        = useViewerStore(s => s.resetModel)
 
-  // ── init scene ──────────────────────────────────────────
+  const selectedGlobalIds = useSelectionStore(s => s.selectedGlobalIds)
+  const primaryGlobalId   = useSelectionStore(s => s.primaryGlobalId)
+  const selectObject      = useSelectionStore(s => s.selectObject)
+  const clearSelection    = useSelectionStore(s => s.clearSelection)
+
+  const computeAllFrames  = useSimulationStore(s => s.computeAllFrames)
+  const progress          = useSimulationStore(s => s.progress)
+  const activities        = useActivityStore(s => s.activities)
+  const addError          = useUIStore(s => s.addError)
+
+  // ── Init ViewerEngine once ───────────────────────────────
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
 
-    const W = container.clientWidth
-    const H = container.clientHeight
+    // Reset any leftover error state from a previous session
+    resetModel()
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
-    renderer.setSize(W, H)
-    renderer.setPixelRatio(window.devicePixelRatio)
-    renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap
-    renderer.setClearColor(0x070B0F)
-    container.appendChild(renderer.domElement)
-    rendererRef.current = renderer
+    const engine = new ViewerEngine({
+      container,
 
-    // Scene
-    const scene = new THREE.Scene()
-    scene.fog = new THREE.Fog(0x070B0F, 40, 80)
-    sceneRef.current = scene
+      onObjectPicked: (globalId, isMulti) => {
+        if (globalId) selectObject(globalId, isMulti)
+        else          clearSelection()
+      },
 
-    // Camera
-    const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 200)
-    camera.position.set(12, 14, 18)
-    cameraRef.current = camera
+      onSceneReady: () => {
+        setSceneReady(true)
+      },
 
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement)
-    controls.enableDamping = true
-    controls.dampingFactor = 0.07
-    controls.minDistance = 5
-    controls.maxDistance = 60
-    controlsRef.current = controls
+      onModelLoaded: (_count) => {
+        setModelLoadState('loaded')
+      },
 
-    // Lights
-    const ambient = new THREE.AmbientLight(0xffffff, 0.5)
-    scene.add(ambient)
-
-    const sun = new THREE.DirectionalLight(0xffffff, 1.2)
-    sun.position.set(10, 20, 10)
-    sun.castShadow = true
-    sun.shadow.mapSize.set(2048, 2048)
-    sun.shadow.camera.near = 0.5
-    sun.shadow.camera.far = 100
-    sun.shadow.camera.left = -20
-    sun.shadow.camera.right = 20
-    sun.shadow.camera.top = 20
-    sun.shadow.camera.bottom = -20
-    scene.add(sun)
-
-    const fill = new THREE.DirectionalLight(0x4466ff, 0.3)
-    fill.position.set(-10, 5, -10)
-    scene.add(fill)
-
-    // Grid
-    const grid = new THREE.GridHelper(50, 50, 0x1C2128, 0x1C2128)
-    scene.add(grid)
-
-    // Ground plane
-    const groundGeo = new THREE.PlaneGeometry(50, 50)
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0x0D1117 })
-    const ground = new THREE.Mesh(groundGeo, groundMat)
-    ground.rotation.x = -Math.PI / 2
-    ground.position.y = -0.01
-    ground.receiveShadow = true
-    scene.add(ground)
-
-    // Build meshes for each IFC element
-    elements.forEach((el, idx) => {
-      const { w, h, d } = geomForType(el.type)
-      const geo = new THREE.BoxGeometry(w, h, d)
-      const mat = new THREE.MeshLambertMaterial({ color: STATUS_COLORS.future })
-      const mesh = new THREE.Mesh(geo, mat)
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-
-      const pos = POSITIONS[idx] ?? [idx * 3 - 6, 0, 0]
-      mesh.position.set(pos[0], h / 2, pos[2])
-      mesh.userData.globalId = el.globalId
-
-      scene.add(mesh)
-      meshMapRef.current.set(el.globalId, mesh)
+      onError: (message) => {
+        addError(message, '3D Viewer')
+        setModelError(message)
+        setModelLoadState('error')
+      },
     })
 
-    // Edge outlines
-    meshMapRef.current.forEach((mesh) => {
-      const edges = new THREE.EdgesGeometry(mesh.geometry)
-      const lineMat = new THREE.LineBasicMaterial({ color: 0x30363D, transparent: true, opacity: 0.6 })
-      const lines = new THREE.LineSegments(edges, lineMat)
-      mesh.add(lines)
+    engine.init().catch(err => {
+      const msg = err instanceof Error ? err.message : 'Viewer failed to initialize'
+      addError(msg, '3D Viewer')
+      setModelError(msg)
+      setModelLoadState('error')
     })
 
-    // Resize observer
-    const ro = new ResizeObserver(() => {
-      const w = container.clientWidth
-      const h = container.clientHeight
-      camera.aspect = w / h
-      camera.updateProjectionMatrix()
-      renderer.setSize(w, h)
-    })
-    ro.observe(container)
-
-    // Render loop
-    function animate() {
-      frameRef.current = requestAnimationFrame(animate)
-      controls.update()
-      renderer.render(scene, camera)
-    }
-    animate()
+    engineRef.current = engine
 
     return () => {
-      cancelAnimationFrame(frameRef.current)
-      ro.disconnect()
-      renderer.dispose()
-      container.removeChild(renderer.domElement)
+      engine.dispose()
+      engineRef.current = null
+      setSceneReady(false)
+      resetModel()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── update colors on progress / selection change ────────
+  // ── Apply simulation colors ──────────────────────────────
   useEffect(() => {
-    meshMapRef.current.forEach((mesh, globalId) => {
-      const mat = mesh.material as THREE.MeshLambertMaterial
-      if (globalId === selectedIFCId) {
-        mat.color.setHex(STATUS_COLORS.selected)
-        mat.emissive.setHex(0x443300)
+    const engine = engineRef.current
+    if (!engine || modelLoadState !== 'loaded') return
+
+    const frames    = computeAllFrames(activities)
+    const overrides = new Map<string, string>()
+
+    ifcObjects.forEach(obj => {
+      if (obj.globalId === primaryGlobalId) {
+        overrides.set(obj.globalId, '#FF8C00')
+      } else if (selectedGlobalIds.has(obj.globalId)) {
+        overrides.set(obj.globalId, '#FFD700')
       } else {
-        const status = getElementStatus(globalId)
-        mat.color.setHex(STATUS_COLORS[status])
-        mat.emissive.setHex(0x000000)
+        const frame = frames.get(obj.globalId)
+        overrides.set(obj.globalId, frame?.color ?? '#B0B0B0')
       }
-      mat.needsUpdate = true
     })
-  }, [selectedIFCId, timelineProgress, getElementStatus])
 
-  // ── click handler ────────────────────────────────────────
-  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const container = containerRef.current
-    const renderer  = rendererRef.current
-    const camera    = cameraRef.current
-    const scene     = sceneRef.current
-    if (!container || !renderer || !camera || !scene) return
+    engine.applyColorOverrides(overrides)
+  }, [
+    primaryGlobalId,
+    selectedGlobalIds,
+    progress,
+    computeAllFrames,
+    activities,
+    ifcObjects,
+    modelLoadState,
+  ])
 
-    const rect   = container.getBoundingClientRect()
-    const mouse  = new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1,
-    )
-    const raycaster = new THREE.Raycaster()
-    raycaster.setFromCamera(mouse, camera)
-
-    const meshes = Array.from(meshMapRef.current.values())
-    const hits   = raycaster.intersectObjects(meshes, false)
-
-    if (hits.length > 0) {
-      const globalId = hits[0].object.userData.globalId as string
-      setSelectedIFCId(globalId)
-    } else {
-      setSelectedIFCId(null)
-    }
-  }, [setSelectedIFCId])
-
-  // ── status counts for stats overlay ─────────────────────
+  // ── Stats counts ─────────────────────────────────────────
+  const frames = computeAllFrames(activities)
   const counts = { completed: 0, active: 0, future: 0 }
-  elements.forEach(el => { counts[getElementStatus(el.globalId)]++ })
+  ifcObjects.forEach(obj => {
+    const status = frames.get(obj.globalId)?.status ?? 'future'
+    counts[status]++
+  })
+
+  // ── Overlay logic ─────────────────────────────────────────
+  // Show spinner while engine is booting (before sceneReady)
+  const showInitializing = !sceneReady && modelLoadState !== 'error'
+
+  // Show upload zone only when scene is ready and no model loaded
+  const showUploadZone = sceneReady && modelLoadState === 'idle'
+
+  // Show loading overlay while IFC is being parsed
+  const showLoadingOverlay = sceneReady && modelLoadState === 'loading'
+
+  // Show error overlay only on explicit error
+  const showErrorOverlay = modelLoadState === 'error'
 
   return (
-    <div className="viewer-container" ref={containerRef} onClick={handleClick}>
-      {/* Stats overlay */}
-      <div className="viewer-stats">
-        <div className="viewer-stats__row">
-          <span>Total Elements</span>
-          <span className="viewer-stats__val">{elements.length}</span>
-        </div>
-        <div className="viewer-stats__row">
-          <span>Completed</span>
-          <span className="viewer-stats__val" style={{ color: '#2ECC71' }}>{counts.completed}</span>
-        </div>
-        <div className="viewer-stats__row">
-          <span>Active</span>
-          <span className="viewer-stats__val" style={{ color: '#2F6BFF' }}>{counts.active}</span>
-        </div>
-        <div className="viewer-stats__row">
-          <span>Upcoming</span>
-          <span className="viewer-stats__val" style={{ color: '#B0B0B0' }}>{counts.future}</span>
-        </div>
-      </div>
+    <div style={{ width: '100%', height: '100%', position: 'relative', background: '#070B0F' }}>
 
-      {/* Legend overlay */}
-      <div className="viewer-legend">
-        <div className="viewer-legend__title">Element Status</div>
-        <div className="legend-item">
-          <div className="legend-swatch" style={{ background: '#2ECC71' }} />
-          Completed
+      {/* Three.js / OBC canvas mounts here */}
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+      {/* ── Initializing overlay — engine booting ── */}
+      {showInitializing && (
+        <div style={{
+          position:       'absolute',
+          inset:          0,
+          display:        'flex',
+          alignItems:     'center',
+          justifyContent: 'center',
+          background:     'rgba(7, 11, 15, 0.92)',
+          zIndex:         10,
+        }}>
+          <div className="upload-zone upload-zone--loading">
+            <div className="upload-spinner" />
+            <p className="upload-zone__title">Initializing Viewer...</p>
+            <p className="upload-zone__subtitle">Setting up 3D engine.</p>
+          </div>
         </div>
-        <div className="legend-item">
-          <div className="legend-swatch" style={{ background: '#2F6BFF' }} />
-          Active / In-Progress
+      )}
+
+      {/* ── Upload zone — ready and waiting for a file ── */}
+      {showUploadZone && (
+        <div style={{
+          position:       'absolute',
+          inset:          0,
+          display:        'flex',
+          alignItems:     'center',
+          justifyContent: 'center',
+          background:     'rgba(7, 11, 15, 0.92)',
+          zIndex:         10,
+        }}>
+          <IFCUploadZone viewerEngine={engineRef.current} />
         </div>
-        <div className="legend-item">
-          <div className="legend-swatch" style={{ background: '#B0B0B0' }} />
-          Upcoming
+      )}
+
+      {/* ── Parsing overlay — IFC being processed ── */}
+      {showLoadingOverlay && (
+        <div style={{
+          position:       'absolute',
+          inset:          0,
+          display:        'flex',
+          alignItems:     'center',
+          justifyContent: 'center',
+          background:     'rgba(7, 11, 15, 0.92)',
+          zIndex:         10,
+        }}>
+          <div className="upload-zone upload-zone--loading">
+            <div className="upload-spinner" />
+            <p className="upload-zone__title">Parsing IFC Model...</p>
+            <p className="upload-zone__subtitle">
+              This may take up to 30 seconds for large files.
+            </p>
+          </div>
         </div>
-        <div className="legend-item">
-          <div className="legend-swatch" style={{ background: '#FFD700' }} />
-          Selected
+      )}
+
+      {/* ── Error overlay — something went wrong ── */}
+      {showErrorOverlay && (
+        <div style={{
+          position:       'absolute',
+          inset:          0,
+          display:        'flex',
+          alignItems:     'center',
+          justifyContent: 'center',
+          background:     'rgba(7, 11, 15, 0.92)',
+          zIndex:         10,
+        }}>
+          <IFCUploadZone viewerEngine={engineRef.current} />
         </div>
-      </div>
+      )}
+
+      {/* ── Stats overlay — model loaded ── */}
+      {modelLoadState === 'loaded' && (
+        <>
+          <div className="viewer-stats">
+            <div className="viewer-stats__row">
+              <span>Total Elements</span>
+              <span className="viewer-stats__val">{ifcObjects.length}</span>
+            </div>
+            <div className="viewer-stats__row">
+              <span>Completed</span>
+              <span className="viewer-stats__val" style={{ color: '#2ECC71' }}>
+                {counts.completed}
+              </span>
+            </div>
+            <div className="viewer-stats__row">
+              <span>Active</span>
+              <span className="viewer-stats__val" style={{ color: '#2F6BFF' }}>
+                {counts.active}
+              </span>
+            </div>
+            <div className="viewer-stats__row">
+              <span>Upcoming</span>
+              <span className="viewer-stats__val" style={{ color: '#B0B0B0' }}>
+                {counts.future}
+              </span>
+            </div>
+          </div>
+
+          <div className="viewer-legend">
+            <div className="viewer-legend__title">Element Status</div>
+            <div className="legend-item">
+              <div className="legend-swatch" style={{ background: '#2ECC71' }} />
+              Completed
+            </div>
+            <div className="legend-item">
+              <div className="legend-swatch" style={{ background: '#2F6BFF' }} />
+              Active / In-Progress
+            </div>
+            <div className="legend-item">
+              <div className="legend-swatch" style={{ background: '#B0B0B0' }} />
+              Upcoming
+            </div>
+            <div className="legend-item">
+              <div className="legend-swatch" style={{ background: '#FFD700' }} />
+              Selected
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

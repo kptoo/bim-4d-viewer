@@ -1,9 +1,18 @@
+import { ErrorBoundary } from '../app/providers/ErrorBoundary'
 import IFCViewer from './IFCViewer'
 import GanttPanel from './GanttPanel'
 import TimelineSlider from './TimelineSlider'
 import IFCInspector from './IFCInspector'
+import { useViewerStore } from '../store/viewer.store'
+import { IFCUploadService } from '../services/ifc/IFCUploadService'
 
 export default function Layout() {
+  const ifcObjects     = useViewerStore(s => s.ifcObjects)
+  const modelLoadState = useViewerStore(s => s.modelLoadState)
+  const modelFileName  = useViewerStore(s => s.modelFileName)
+  const modelFileSize  = useViewerStore(s => s.modelFileSize)
+  const resetModel     = useViewerStore(s => s.resetModel)
+
   return (
     <div className="bim-layout">
       {/* ── HEADER ── */}
@@ -19,14 +28,26 @@ export default function Layout() {
         <div className="bim-header__center">
           <span className="bim-badge bim-badge--active">
             <span className="dot" />
-            Tower Block A — Phase 1
+            {modelLoadState === 'loaded' && modelFileName
+              ? modelFileName
+              : 'No Model Loaded'}
           </span>
-          <span className="bim-badge">IFC 2x3</span>
-          <span className="bim-badge">12 Elements</span>
+          {modelLoadState === 'loaded' && modelFileSize && (
+            <span className="bim-badge">
+              {IFCUploadService.formatFileSize(modelFileSize)}
+            </span>
+          )}
+          <span className="bim-badge">
+            {ifcObjects.length} Elements
+          </span>
         </div>
 
         <div className="bim-header__right">
-          <button className="header-btn">⬆ Import IFC</button>
+          {modelLoadState === 'loaded' && (
+            <button className="header-btn" onClick={resetModel}>
+              ↩ Load New Model
+            </button>
+          )}
           <button className="header-btn">📤 Export Report</button>
           <button className="header-btn">⚙ Settings</button>
         </div>
@@ -44,12 +65,16 @@ export default function Layout() {
           </div>
         </div>
         <div className="panel-body">
-          <IFCViewer />
+          <ErrorBoundary context="3D Viewer">
+            <IFCViewer />
+          </ErrorBoundary>
         </div>
       </div>
 
       {/* ── TIMELINE ── */}
-      <TimelineSlider />
+      <ErrorBoundary context="Timeline Slider">
+        <TimelineSlider />
+      </ErrorBoundary>
 
       {/* ── BOTTOM ROW ── */}
       <div className="bim-bottom">
@@ -62,7 +87,9 @@ export default function Layout() {
             </div>
           </div>
           <div className="panel-body">
-            <GanttPanel />
+            <ErrorBoundary context="Gantt Panel">
+              <GanttPanel />
+            </ErrorBoundary>
           </div>
         </div>
 
@@ -74,7 +101,9 @@ export default function Layout() {
             </div>
           </div>
           <div className="panel-body">
-            <IFCInspector />
+            <ErrorBoundary context="IFC Inspector">
+              <IFCInspector />
+            </ErrorBoundary>
           </div>
         </div>
       </div>

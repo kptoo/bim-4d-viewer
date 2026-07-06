@@ -1,9 +1,12 @@
-import { useMemo, useRef } from 'react'
-import { useBIMStore } from '../state/bimStore'
+import { useMemo } from 'react'
+import { useActivityStore } from '../store/activity.store'
+import { useSelectionStore } from '../store/selection.store'
+import { useSimulationStore } from '../store/simulation.store'
+import type { Activity } from '../types'
 
 const PROJECT_START = new Date('2024-01-01').getTime()
 const PROJECT_END   = new Date('2024-12-31').getTime()
-const LABEL_WIDTH   = 160   // px
+const LABEL_WIDTH   = 160
 
 function dateToPercent(dateStr: string): number {
   const t = new Date(dateStr).getTime()
@@ -12,38 +15,43 @@ function dateToPercent(dateStr: string): number {
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
+const STATUS_COLOR = { completed: '#2ECC71', active: '#2F6BFF', future: '#B0B0B0' }
+
 export default function GanttPanel() {
-  const tasks          = useBIMStore(s => s.tasks)
-  const selectedTaskId = useBIMStore(s => s.selectedTaskId)
-  const selectedIFCId  = useBIMStore(s => s.selectedIFCId)
-  const currentDate    = useBIMStore(s => s.currentDate)
-  const setSelectedTaskId = useBIMStore(s => s.setSelectedTaskId)
-  const getTaskStatus  = useBIMStore(s => s.getTaskStatus)
+  const activities       = useActivityStore(s => s.activities)
+  const selectedActivityId = useSelectionStore(s => s.selectedActivityId)
+  const primaryGlobalId  = useSelectionStore(s => s.primaryGlobalId)
+  const selectActivity   = useSelectionStore(s => s.selectActivity)
+  const currentDate      = useSimulationStore(s => s.currentDate)
+  const computeAllFrames = useSimulationStore(s => s.computeAllFrames)
 
   const nowPct = useMemo(() =>
     ((currentDate.getTime() - PROJECT_START) / (PROJECT_END - PROJECT_START)) * 100,
   [currentDate])
 
-  const containerRef = useRef<HTMLDivElement>(null)
+  // Compute all frames once per render
+  const frames = computeAllFrames(activities)
 
-  const statusColor = (status: string) => {
-    if (status === 'completed') return '#2ECC71'
-    if (status === 'active')    return '#2F6BFF'
-    return '#B0B0B0'
+  const handleActivityClick = (activity: Activity) => {
+    selectActivity(activity.id, activity.linkedGlobalIds[0])
   }
 
   return (
-    <div className="gantt-wrap" ref={containerRef}>
+    <div className="gantt-wrap">
       <div className="gantt-chart">
 
         {/* Month header */}
         <div
           className="gantt-month-header"
-          style={{
-            gridTemplateColumns: `${LABEL_WIDTH}px repeat(12, 1fr)`,
-          }}
+          style={{ gridTemplateColumns: `${LABEL_WIDTH}px repeat(12, 1fr)` }}
         >
-          <div style={{ borderRight: '1px solid var(--border-color)', padding: '6px 10px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>
+          <div style={{
+            borderRight: '1px solid var(--border-color)',
+            padding: '6px 10px',
+            fontSize: 10,
+            color: 'var(--text-secondary)',
+            fontWeight: 700,
+          }}>
             TASK
           </div>
           {MONTHS.map(m => (
@@ -51,65 +59,64 @@ export default function GanttPanel() {
           ))}
         </div>
 
-        {/* Task rows */}
-        {tasks.map(task => {
-          const status        = getTaskStatus(task.id)
-          const startPct      = dateToPercent(task.start)
-          const endPct        = dateToPercent(task.end)
-          const widthPct      = endPct - startPct
-          const isSelected    = selectedTaskId === task.id
-          const isHighlighted = selectedIFCId != null && task.ifcIds.includes(selectedIFCId)
+        {/* Activity rows */}
+        {activities.map(activity => {
+          const startPct   = dateToPercent(activity.startDate)
+          const endPct     = dateToPercent(activity.endDate)
+          const widthPct   = endPct - startPct
+
+          // Derive status from the pre-computed frame of the first linked object
+          const firstFrame  = activity.linkedGlobalIds[0]
+            ? frames.get(activity.linkedGlobalIds[0])
+            : undefined
+          const status       = firstFrame?.status ?? 'future'
+          const statusColor  = STATUS_COLOR[status]
+
+          const isSelected    = selectedActivityId === activity.id
+          const isHighlighted = primaryGlobalId !== null &&
+            activity.linkedGlobalIds.includes(primaryGlobalId)
 
           return (
             <div
-              key={task.id}
-              className={`gantt-row${isSelected ? ' selected' : ''}${isHighlighted && !isSelected ? ' highlighted' : ''}`}
+              key={activity.id}
+              className={[
+                'gantt-row',
+                isSelected    ? 'selected'    : '',
+                isHighlighted && !isSelected ? 'highlighted' : '',
+              ].join(' ').trim()}
               style={{ gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }}
-              onClick={() => setSelectedTaskId(task.id)}
+              onClick={() => handleActivityClick(activity)}
             >
               {/* Label */}
               <div className="gantt-task-label">
-                <div
-                  className="gantt-status-dot"
-                  style={{ background: statusColor(status) }}
-                />
-                <span className="gantt-task-name">{task.name}</span>
+                <div className="gantt-status-dot" style={{ background: statusColor }} />
+                <span className="gantt-task-name">{activity.name}</span>
               </div>
 
               {/* Bar area */}
               <div className="gantt-bar-cell" style={{ position: 'relative' }}>
-                {/* Now line */}
-                {nowPct >= 0 && nowPct <= 100 && (
+                {/* Now line — only on first row to avoid duplication */}
+                {activity === activities[0] && nowPct >= 0 && nowPct <= 100 && (
                   <>
-                    <div
-                      className="gantt-now-line"
-                      style={{ left: `${nowPct}%` }}
-                    />
-                    {task === tasks[0] && (
-                      <div
-                        className="gantt-now-label"
-                        style={{ left: `${nowPct}%` }}
-                      >
-                        NOW
-                      </div>
-                    )}
+                    <div className="gantt-now-line" style={{ left: `${nowPct}%` }} />
+                    <div className="gantt-now-label" style={{ left: `${nowPct}%` }}>NOW</div>
                   </>
                 )}
 
-                {/* Task bar */}
+                {/* Activity bar */}
                 <div
                   className="gantt-bar"
                   style={{
-                    left: `${startPct}%`,
-                    width: `${widthPct}%`,
-                    background: task.color,
-                    opacity: status === 'future' ? 0.45 : 1,
-                    boxShadow: isSelected
-                      ? `0 0 0 2px #fff, 0 0 12px ${task.color}`
-                      : `0 2px 6px rgba(0,0,0,0.3)`,
+                    left:      `${startPct}%`,
+                    width:     `${widthPct}%`,
+                    background: activity.color,
+                    opacity:    status === 'future' ? 0.45 : 1,
+                    boxShadow:  isSelected
+                      ? `0 0 0 2px #fff, 0 0 12px ${activity.color}`
+                      : '0 2px 6px rgba(0,0,0,0.3)',
                   }}
                 >
-                  {widthPct > 8 && task.name}
+                  {widthPct > 8 && activity.name}
                 </div>
               </div>
             </div>

@@ -1,45 +1,36 @@
-import { useEffect, useRef, useState } from 'react'
-import { useBIMStore } from '../state/bimStore'
+import { useEffect, useRef } from 'react'
+import { useSimulationStore } from '../store/simulation.store'
+import { useActivityStore } from '../store/activity.store'
+import { formatDisplayDate } from '../utils/date.utils'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-function formatDate(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
 export default function TimelineSlider() {
-  const progress         = useBIMStore(s => s.timelineProgress)
-  const currentDate      = useBIMStore(s => s.currentDate)
-  const setProgress      = useBIMStore(s => s.setTimelineProgress)
-  const getElementStatus = useBIMStore(s => s.getElementStatus)
-  const elements         = useBIMStore(s => s.ifcElements)
+  const progress         = useSimulationStore(s => s.progress)
+  const currentDate      = useSimulationStore(s => s.currentDate)
+  const isPlaying        = useSimulationStore(s => s.isPlaying)
+  const setProgress      = useSimulationStore(s => s.setProgress)
+  const setPlaying       = useSimulationStore(s => s.setPlaying)
+  const tick             = useSimulationStore(s => s.tick)
+  const computeAllFrames = useSimulationStore(s => s.computeAllFrames)
+  const activities       = useActivityStore(s => s.activities)
 
-  const [playing, setPlaying] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const counts = { completed: 0, active: 0, future: 0 }
-  elements.forEach(el => { counts[getElementStatus(el.globalId)]++ })
-
+  // ── Auto-play loop ────────────────────────────────────────
   useEffect(() => {
-    if (playing) {
-      intervalRef.current = setInterval(() => {
-        useBIMStore.setState(s => {
-          const next = s.timelineProgress + 1
-          if (next >= 100) {
-            setPlaying(false)
-            return { timelineProgress: 100 }
-          }
-          return { timelineProgress: next, currentDate: new Date(
-            new Date('2024-01-01').getTime() +
-            ((new Date('2024-12-31').getTime() - new Date('2024-01-01').getTime()) * next) / 100
-          )}
-        })
-      }, 100)
+    if (isPlaying) {
+      intervalRef.current = setInterval(tick, 100)
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
-  }, [playing])
+  }, [isPlaying, tick])
+
+  // ── Status counts (derived from SimulationEngine) ─────────
+  const frames = computeAllFrames(activities)
+  const counts = { completed: 0, active: 0, future: 0 }
+  frames.forEach(frame => { counts[frame.status]++ })
 
   return (
     <div className="timeline-panel">
@@ -47,23 +38,17 @@ export default function TimelineSlider() {
         <span className="timeline-label">4D Timeline Control</span>
 
         <button
-          className={`play-btn${playing ? ' playing' : ''}`}
-          onClick={() => setPlaying(p => !p)}
-          title={playing ? 'Pause' : 'Play simulation'}
+          className={`play-btn${isPlaying ? ' playing' : ''}`}
+          onClick={() => setPlaying(!isPlaying)}
+          title={isPlaying ? 'Pause simulation' : 'Play simulation'}
         >
-          {playing ? '⏸' : '▶'}
+          {isPlaying ? '⏸' : '▶'}
         </button>
 
         <div className="timeline-slider-wrap">
           <div className="timeline-slider-track">
-            <div
-              className="timeline-slider-fill"
-              style={{ width: `${progress}%` }}
-            />
-            <div
-              className="timeline-slider-thumb"
-              style={{ left: `${progress}%` }}
-            />
+            <div className="timeline-slider-fill" style={{ width: `${progress}%` }} />
+            <div className="timeline-slider-thumb" style={{ left: `${progress}%` }} />
             <input
               type="range"
               className="timeline-input"
@@ -81,7 +66,7 @@ export default function TimelineSlider() {
           </div>
         </div>
 
-        <span className="timeline-date-display">{formatDate(currentDate)}</span>
+        <span className="timeline-date-display">{formatDisplayDate(currentDate)}</span>
       </div>
 
       <div className="timeline-bottom">

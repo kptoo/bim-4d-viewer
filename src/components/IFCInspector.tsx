@@ -1,27 +1,44 @@
-import { useBIMStore } from '../state/bimStore'
+import { useSelectionStore } from '../store/selection.store'
+import { useViewerStore } from '../store/viewer.store'
+import { useActivityStore } from '../store/activity.store'
+import { useSimulationStore } from '../store/simulation.store'
+import { useLayerStore } from '../store/layer.store'
+import { ifcTypeIcon } from '../utils/ifc.utils'
+import type { Activity, SimulationStatus } from '../types'
 
-const TYPE_ICONS: Record<string, string> = {
-  IfcWall:        '🧱',
-  IfcSlab:        '⬛',
-  IfcColumn:      '🏛',
-  IfcBeam:        '➖',
-  IfcStair:       '🪜',
-  IfcFlowSegment: '🔩',
-  IfcCurtainWall: '🪟',
-  IfcCovering:    '🟫',
+const STATUS_LABEL: Record<SimulationStatus, string> = {
+  completed: 'Completed',
+  active:    'In Progress',
+  future:    'Upcoming',
 }
 
 export default function IFCInspector() {
-  const selectedIFCId    = useBIMStore(s => s.selectedIFCId)
-  const selectedTaskId   = useBIMStore(s => s.selectedTaskId)
-  const elements         = useBIMStore(s => s.ifcElements)
-  const tasks            = useBIMStore(s => s.tasks)
-  const getElementStatus = useBIMStore(s => s.getElementStatus)
+  const primaryGlobalId       = useSelectionStore(s => s.primaryGlobalId)
+  const selectedActivityId    = useSelectionStore(s => s.selectedActivityId)
+  const getObjectByGlobalId   = useViewerStore(s => s.getObjectByGlobalId)
+  const getActivitiesForObject = useActivityStore(s => s.getActivitiesForObject)
+  const getActivityById       = useActivityStore(s => s.getActivityById)
+  const getLayersForObject    = useLayerStore(s => s.getLayersForObject)
+  const computeAllFrames      = useSimulationStore(s => s.computeAllFrames)
+  const activities            = useActivityStore(s => s.activities)
 
-  const element = elements.find(e => e.globalId === selectedIFCId) ?? null
-  const task    = tasks.find(t => t.id === selectedTaskId) ?? null
+  const ifcObject    = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
+  const linkedActivity: Activity | undefined = selectedActivityId
+    ? getActivityById(selectedActivityId)
+    : ifcObject
+      ? getActivitiesForObject(ifcObject.globalId)[0]
+      : undefined
 
-  if (!element) {
+  const assignedLayers = ifcObject
+    ? getLayersForObject(ifcObject.globalId)
+    : []
+
+  const frames = computeAllFrames(activities)
+  const status = ifcObject
+    ? (frames.get(ifcObject.globalId)?.status ?? 'future')
+    : 'future'
+
+  if (!ifcObject) {
     return (
       <div className="inspector-body">
         <div className="inspector-empty">
@@ -32,13 +49,7 @@ export default function IFCInspector() {
     )
   }
 
-  const status    = getElementStatus(element.globalId)
-  const typeIcon  = TYPE_ICONS[element.type] ?? '📦'
-
-  const statusLabel = status === 'completed' ? 'Completed'
-                    : status === 'active'    ? 'In Progress'
-                    : 'Upcoming'
-
+  const typeIcon = ifcTypeIcon(ifcObject.type)
   const copyToClipboard = (text: string) => navigator.clipboard.writeText(text)
 
   return (
@@ -49,10 +60,10 @@ export default function IFCInspector() {
         <div className="inspector-type-header">
           <div className="inspector-type-icon">{typeIcon}</div>
           <div className="inspector-type-info">
-            <div className="inspector-element-name">{element.name}</div>
-            <div className="inspector-type-badge">{element.type}</div>
+            <div className="inspector-element-name">{ifcObject.name}</div>
+            <div className="inspector-type-badge">{ifcObject.type}</div>
           </div>
-          <span className={`status-badge ${status}`}>{statusLabel}</span>
+          <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
         </div>
 
         {/* Properties */}
@@ -60,10 +71,10 @@ export default function IFCInspector() {
           <div className="prop-row">
             <span className="prop-key">Global ID</span>
             <span className="prop-val">
-              {element.globalId}
+              {ifcObject.globalId}
               <button
                 className="copy-btn"
-                onClick={() => copyToClipboard(element.globalId)}
+                onClick={() => copyToClipboard(ifcObject.globalId)}
                 title="Copy GlobalId"
               >
                 📋
@@ -72,54 +83,67 @@ export default function IFCInspector() {
           </div>
           <div className="prop-row">
             <span className="prop-key">Name</span>
-            <span className="prop-val">{element.name}</span>
+            <span className="prop-val">{ifcObject.name}</span>
           </div>
           <div className="prop-row">
             <span className="prop-key">IFC Type</span>
             <span className="prop-val">
-              <span className="inspector-type-badge">{element.type}</span>
+              <span className="inspector-type-badge">{ifcObject.type}</span>
             </span>
           </div>
           <div className="prop-row">
             <span className="prop-key">Status</span>
             <span className="prop-val">
-              <span className={`status-badge ${status}`}>{statusLabel}</span>
+              <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
             </span>
           </div>
-          {task && (
+
+          {/* Information layers */}
+          {assignedLayers.length > 0 && (
             <div className="prop-row">
-              <span className="prop-key">Task ID</span>
-              <span className="prop-val">{task.id}</span>
+              <span className="prop-key">Layers</span>
+              <span className="prop-val" style={{ flexWrap: 'wrap', gap: 4 }}>
+                {assignedLayers.map(layer => (
+                  <span
+                    key={layer.id}
+                    className="inspector-type-badge"
+                    style={{ background: `${layer.color}22`, borderColor: layer.color, color: layer.color }}
+                  >
+                    {layer.name}
+                  </span>
+                ))}
+              </span>
             </div>
           )}
         </div>
 
-        {/* Linked task */}
-        {task && (
+        {/* Linked activity */}
+        {linkedActivity && (
           <div className="inspector-task-card">
-            <div className="inspector-task-title">Linked Construction Task</div>
-            <div className="inspector-task-name" style={{ color: task.color }}>
-              {task.name}
+            <div className="inspector-task-title">Linked Construction Activity</div>
+            <div className="inspector-task-name" style={{ color: linkedActivity.color }}>
+              {linkedActivity.name}
             </div>
             <div className="inspector-task-dates">
-              📅 {task.start} → {task.end}
+              📅 {linkedActivity.startDate} → {linkedActivity.endDate}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-              {task.ifcIds.length} element{task.ifcIds.length !== 1 ? 's' : ''} in this task
+              {linkedActivity.linkedGlobalIds.length} element
+              {linkedActivity.linkedGlobalIds.length !== 1 ? 's' : ''} in this activity
             </div>
           </div>
         )}
 
         {/* Quick actions */}
         <div className="inspector-actions">
-          <button className="action-btn" onClick={() => console.log('Zoom to', element.globalId)}>
+          <button className="action-btn" onClick={() => console.log('Zoom to', ifcObject.globalId)}>
             🔍 Zoom To
           </button>
-          <button className="action-btn" onClick={() => console.log('Isolate', element.globalId)}>
+          <button className="action-btn" onClick={() => console.log('Isolate', ifcObject.globalId)}>
             💡 Isolate
           </button>
-          <button className="action-btn" onClick={() => console.log('Show task', task?.id)}>
-            📋 Task
+          <button className="action-btn" onClick={() => console.log('Show activity', linkedActivity?.id)}>
+            📋 Activity
           </button>
         </div>
       </div>
