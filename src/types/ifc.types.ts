@@ -1,33 +1,47 @@
-/**
- * Core IFC domain types.
- *
- * These types represent every IFC object as a normalized,
- * framework-agnostic data structure. They are the single
- * source of truth for IFC data across the entire application.
- *
- * Designed to be extended with classification systems
- * (CoClass, Uniclass, OmniClass, AI-generated) without
- * modifying existing consumers.
- */
-
 export interface IFCObject {
   /** IFC GlobalId — primary key used across the entire app */
   globalId: string
 
   /**
-   * Internal IFC parser express ID.
+   * Internal IFC parser express ID (= local ID in That Open Engine).
    * Used by That Open Engine for direct mesh lookups.
    * Optional because mock data does not have it yet.
    */
   expressId?: number
 
-  /** Human-readable name from the IFC model */
+  /** Human-readable name from the IFC model (IfcRoot.Name) */
   name: string
 
   /** IFC entity type, e.g. IfcWall, IfcColumn, IfcSlab */
   type: IFCType
 
-  /** Flat list of property sets extracted from the IFC model */
+  /**
+   * IfcElement.Tag — manufacturer or construction mark (e.g. "W1").
+   * null when not present in the model.
+   */
+  tag: string | null
+
+  /**
+   * IfcRoot.Description — free-text description of the element.
+   * null when not present in the model.
+   */
+  description: string | null
+
+  /**
+   * IfcObject.ObjectType — user-defined object type / family name
+   * (e.g. "Basic Wall:Bearing Wall").
+   * null when not present in the model.
+   */
+  objectType: string | null
+
+  /**
+   * IfcElement.PredefinedType — enumeration from the IFC schema
+   * (e.g. "DOOR", "STANDARDCASE", "NOTDEFINED").
+   * null when not present in the model.
+   */
+  predefinedType: string | null
+
+  /** Flat list of property set entries extracted from the IFC model */
   properties: IFCProperty[]
 
   /** IDs of information layers assigned to this object */

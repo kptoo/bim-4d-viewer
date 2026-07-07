@@ -860,7 +860,108 @@ input[type="range"].timeline-input {
   color: var(--accent-blue);
   background: rgba(47, 107, 255, 0.08);
 }
+/* ── Section divider titles ── */
+.inspector-section-title {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color:          var(--text-secondary);
+  padding:        10px 14px 4px;
+  border-top:     1px solid var(--border-color);
+  margin-top:     4px;
+}
 
+/* ── Long value truncation (e.g. GlobalId) ── */
+.prop-val-text {
+  overflow:       hidden;
+  text-overflow:  ellipsis;
+  white-space:    nowrap;
+  max-width:      130px;
+  display:        inline-block;
+  vertical-align: middle;
+}
+
+/* ── Property Sets container ── */
+.inspector-psets {
+  padding: 0 0 8px;
+}
+
+/* ── Single Pset group ── */
+.inspector-pset {
+  border-top: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.inspector-pset:first-child {
+  border-top: none;
+}
+
+/* ── Pset toggle header ── */
+.inspector-pset-header {
+  display:     flex;
+  align-items: center;
+  gap:         6px;
+  width:       100%;
+  background:  none;
+  border:      none;
+  padding:     6px 14px;
+  cursor:      pointer;
+  text-align:  left;
+  color:       var(--text-primary);
+  font-size:   11px;
+  font-weight: 600;
+  transition:  background 0.1s;
+}
+
+.inspector-pset-header:hover {
+  background: rgba(47, 107, 255, 0.06);
+}
+
+.inspector-pset-chevron {
+  font-size:   10px;
+  color:       var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.inspector-pset-name {
+  flex:          1;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+  font-family:   monospace;
+  font-size:     11px;
+  color:         var(--text-primary);
+}
+
+.inspector-pset-count {
+  font-size:   10px;
+  color:       var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* ── Properties inside a Pset ── */
+.inspector-pset-body {
+  padding-bottom: 4px;
+}
+
+.prop-row--pset {
+  padding:    2px 14px 2px 24px;
+  min-height: 22px;
+}
+
+.prop-key--pset {
+  font-size:  11px;
+  color:      var(--text-secondary);
+  min-width:  120px;
+  max-width:  120px;
+}
+
+.prop-val--pset {
+  font-family: monospace;
+  font-size:   11px;
+  color:       var(--text-primary);
+  word-break:  break-all;
+}
 /* ─── IFC OBJECT TREE ────────────────────────────────────── */
 
 .tree-panel {

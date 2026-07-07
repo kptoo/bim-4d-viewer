@@ -1,27 +1,23 @@
-/**
- * IFCObjectMapper — Normalizes raw IFC parser output into
- * the application's IFCObject domain model.
- *
- * This layer isolates the rest of the application from
- * changes in the IFC parser library (That Open Engine).
- * If the parser API changes, only this file needs updating.
- *
- * Phase 1: Works with mock data.
- * Phase 2: Will receive real data from IFCParserService.
- */
-
-import type { IFCObject, IFCType } from '../../types'
+import type { IFCObject, IFCProperty, IFCType } from '../../types'
 
 /**
- * Raw IFC data shape from the parser (Phase 1: mock shape).
- * In Phase 2, this will be replaced with That Open Engine types.
+ * Raw IFC data shape from the parser.
+ * Mirrors the attributes extracted by IFCLoaderWrapper.extractObjects().
  */
 export interface RawIFCData {
-  globalId:  string
-  expressId?: number
-  name:      string
-  type:      string
-  properties?: Array<{ set: string; name: string; value: string | number | boolean | null }>
+  globalId:        string
+  expressId?:      number
+  name:            string
+  type:            string
+  /** IfcElement.Tag — manufacturer tag / mark */
+  tag?:            string | null
+  /** IfcRoot.Description */
+  description?:    string | null
+  /** IfcObject.ObjectType — user-defined object type label */
+  objectType?:     string | null
+  /** IfcElement.PredefinedType (type-specific enum) */
+  predefinedType?: string | null
+  properties?:     IFCProperty[]
 }
 
 /**
@@ -30,15 +26,19 @@ export interface RawIFCData {
  */
 export function mapRawToIFCObject(raw: RawIFCData): IFCObject {
   return {
-    globalId:      raw.globalId,
-    expressId:     raw.expressId,
-    name:          raw.name || 'Unnamed Element',
-    type:          raw.type as IFCType,
-    properties:    raw.properties ?? [],
-    layerIds:      [],     // Populated from database in Phase 3
-    activityIds:   [],     // Populated from database in Phase 4
-    visible:       true,
-    colorOverride: null,
+    globalId:        raw.globalId,
+    expressId:       raw.expressId,
+    name:            raw.name || 'Unnamed',
+    type:            raw.type as IFCType,
+    tag:             raw.tag             ?? null,
+    description:     raw.description     ?? null,
+    objectType:      raw.objectType      ?? null,
+    predefinedType:  raw.predefinedType  ?? null,
+    properties:      raw.properties      ?? [],
+    layerIds:        [],   // Populated from database in Phase 3
+    activityIds:     [],   // Populated from database in Phase 4
+    visible:         true,
+    colorOverride:   null,
   }
 }
 
