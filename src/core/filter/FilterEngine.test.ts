@@ -14,6 +14,13 @@ const makeObject = (
 ): IFCObject => ({
   name:          'Test Object',
   type:          'IfcWall',
+  // Required nullable fields must be given explicit null defaults here.
+  // Without them, spreading Partial<IFCObject> can leave these fields absent,
+  // which TypeScript infers as `undefined` — incompatible with `string | null`.
+  tag:           null,
+  description:   null,
+  objectType:    null,
+  predefinedType: null,
   properties:    [],
   layerIds:      [],
   activityIds:   [],
