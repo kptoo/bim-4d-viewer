@@ -1,10 +1,14 @@
+import { useState } from 'react'
 import { ErrorBoundary } from '../app/providers/ErrorBoundary'
 import IFCViewer from './IFCViewer'
 import GanttPanel from './GanttPanel'
 import TimelineSlider from './TimelineSlider'
 import IFCInspector from './IFCInspector'
+import IFCObjectTree from './IFCObjectTree'
 import { useViewerStore } from '../store/viewer.store'
 import { IFCUploadService } from '../services/ifc/IFCUploadService'
+
+type RightTab = 'inspector' | 'tree'
 
 export default function Layout() {
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
@@ -12,6 +16,8 @@ export default function Layout() {
   const modelFileName  = useViewerStore(s => s.modelFileName)
   const modelFileSize  = useViewerStore(s => s.modelFileSize)
   const resetModel     = useViewerStore(s => s.resetModel)
+
+  const [rightTab, setRightTab] = useState<RightTab>('inspector')
 
   return (
     <div className="bim-layout">
@@ -93,17 +99,40 @@ export default function Layout() {
           </div>
         </div>
 
+        {/* Right panel — tabbed: IFC Inspector | Object Tree */}
         <div className="panel" style={{ borderRight: 'none' }}>
           <div className="panel-header">
-            <span className="panel-header__label">IFC Inspector</span>
+            {/* Tab switcher embedded in header */}
+            <div className="panel-tabs">
+              <button
+                className={`panel-tab${rightTab === 'inspector' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('inspector')}
+              >
+                Inspector
+              </button>
+              <button
+                className={`panel-tab${rightTab === 'tree' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('tree')}
+              >
+                Object Tree
+              </button>
+            </div>
             <div className="panel-header__actions">
-              <button className="panel-action-btn">Properties</button>
+              {rightTab === 'inspector' && (
+                <button className="panel-action-btn">Properties</button>
+              )}
             </div>
           </div>
           <div className="panel-body">
-            <ErrorBoundary context="IFC Inspector">
-              <IFCInspector />
-            </ErrorBoundary>
+            {rightTab === 'inspector' ? (
+              <ErrorBoundary context="IFC Inspector">
+                <IFCInspector />
+              </ErrorBoundary>
+            ) : (
+              <ErrorBoundary context="IFC Object Tree">
+                <IFCObjectTree />
+              </ErrorBoundary>
+            )}
           </div>
         </div>
       </div>

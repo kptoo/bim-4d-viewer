@@ -4972,13 +4972,6 @@ export default function IFCInspector() {
 FILE: src\components\IFCViewer.tsx
 ====================================================================================================
 
-/**
- * IFCViewer — React wrapper for ViewerEngine.
- * Fix: only show upload zone when modelLoadState is 'idle'.
- * Fix: only show error overlay when modelLoadState is 'error'.
- * Fix: never show upload zone before sceneReady.
- */
-
 import { useEffect, useRef } from 'react'
 import { ViewerEngine } from '../viewer/ViewerEngine'
 import { useViewerStore } from '../store/viewer.store'
@@ -5001,22 +4994,22 @@ export default function IFCViewer() {
   const setModelError     = useViewerStore(s => s.setModelError)
   const resetModel        = useViewerStore(s => s.resetModel)
 
-  const selectedGlobalIds = useSelectionStore(s => s.selectedGlobalIds)
-  const primaryGlobalId   = useSelectionStore(s => s.primaryGlobalId)
-  const selectObject      = useSelectionStore(s => s.selectObject)
-  const clearSelection    = useSelectionStore(s => s.clearSelection)
+  const selectedGlobalIds    = useSelectionStore(s => s.selectedGlobalIds)
+  const primaryGlobalId      = useSelectionStore(s => s.primaryGlobalId)
+  const selectObject         = useSelectionStore(s => s.selectObject)
+  const clearSelection       = useSelectionStore(s => s.clearSelection)
 
-  const computeAllFrames  = useSimulationStore(s => s.computeAllFrames)
-  const progress          = useSimulationStore(s => s.progress)
-  const activities        = useActivityStore(s => s.activities)
-  const addError          = useUIStore(s => s.addError)
+  const computeAllFrames     = useSimulationStore(s => s.computeAllFrames)
+  const progress             = useSimulationStore(s => s.progress)
+  const isSimulationActive   = useSimulationStore(s => s.isSimulationActive)
+  const activities           = useActivityStore(s => s.activities)
+  const addError             = useUIStore(s => s.addError)
 
   // ── Init ViewerEngine once ───────────────────────────────
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
 
-    // Reset any leftover error state from a previous session
     resetModel()
 
     const engine = new ViewerEngine({
@@ -5060,33 +5053,115 @@ export default function IFCViewer() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Apply simulation colors ──────────────────────────────
+  // ── Unload 3D scene when state returns to idle ───────────
+  // The header "Load New Model" button calls store.resetModel()
+  // which sets modelLoadState → 'idle'. This effect detects that
+  // transition and immediately clears the Three.js scene so the
+  // previous model is not visible behind the upload zone.
+  useEffect(() => {
+    if (modelLoadState !== 'idle') return
+    const engine = engineRef.current
+    if (!engine) return
+    engine.unloadAll().catch(err => {
+      console.warn('[IFCViewer] unloadAll on idle transition:', err)
+    })
+  }, [modelLoadState])
+
+  // ── Effect 1: Simulation color overlay ──────────────────
+  //
+  // Only runs when isSimulationActive is true.
+  // Applies construction status colors (future/active/completed)
+  // to all objects linked to activities, with selection on top.
+  //
+  // When simulation is deactivated (isSimulationActive → false),
+  // engine.resetColors() restores the original IFC materials for
+  // every object via model.resetColor().
+  //
   useEffect(() => {
     const engine = engineRef.current
     if (!engine || modelLoadState !== 'loaded') return
 
+    if (!isSimulationActive) {
+      // Simulation off — restore original IFC materials for all objects.
+      // Selection highlights are managed in Effect 2.
+      engine.resetColors()
+      return
+    }
+
+    // Simulation active — apply construction status colours.
     const frames    = computeAllFrames(activities)
     const overrides = new Map<string, string>()
 
-    ifcObjects.forEach(obj => {
+    for (const obj of ifcObjects) {
       if (obj.globalId === primaryGlobalId) {
-        overrides.set(obj.globalId, '#FF8C00')
+        overrides.set(obj.globalId, '#FF8C00')        // primary selection
       } else if (selectedGlobalIds.has(obj.globalId)) {
-        overrides.set(obj.globalId, '#FFD700')
+        overrides.set(obj.globalId, '#FFD700')        // multi-select
       } else {
         const frame = frames.get(obj.globalId)
-        overrides.set(obj.globalId, frame?.color ?? '#B0B0B0')
+        if (frame) {
+          // Object has a simulation status — apply its colour
+          overrides.set(obj.globalId, frame.color)
+        }
+        // Objects not linked to any activity are left without an override
+        // so their original IFC material shows through.
       }
-    })
+    }
 
     engine.applyColorOverrides(overrides)
+
   }, [
+    isSimulationActive,
     primaryGlobalId,
     selectedGlobalIds,
     progress,
     computeAllFrames,
     activities,
     ifcObjects,
+    modelLoadState,
+  ])
+
+  // ── Effect 2: Selection highlight (simulation OFF) ───────
+  //
+  // When simulation is off, only the selected object(s) receive
+  // a highlight colour. All other objects keep their original IFC
+  // materials completely untouched.
+  //
+  // When selection clears, engine.resetColors() restores the
+  // original IFC material for the previously highlighted object.
+  //
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine || modelLoadState !== 'loaded') return
+
+    // Effect 1 handles selection colours when simulation is active.
+    if (isSimulationActive) return
+
+    if (selectedGlobalIds.size === 0 && primaryGlobalId === null) return
+
+    const overrides = new Map<string, string>()
+
+    if (primaryGlobalId) {
+      overrides.set(primaryGlobalId, '#FF8C00')
+    }
+    for (const globalId of selectedGlobalIds) {
+      if (globalId !== primaryGlobalId) {
+        overrides.set(globalId, '#FFD700')
+      }
+    }
+
+    engine.applyColorOverrides(overrides)
+
+    return () => {
+      const eng = engineRef.current
+      if (!eng || isSimulationActive) return
+      eng.resetColors()
+    }
+
+  }, [
+    isSimulationActive,
+    selectedGlobalIds,
+    primaryGlobalId,
     modelLoadState,
   ])
 
@@ -5099,17 +5174,10 @@ export default function IFCViewer() {
   })
 
   // ── Overlay logic ─────────────────────────────────────────
-  // Show spinner while engine is booting (before sceneReady)
-  const showInitializing = !sceneReady && modelLoadState !== 'error'
-
-  // Show upload zone only when scene is ready and no model loaded
-  const showUploadZone = sceneReady && modelLoadState === 'idle'
-
-  // Show loading overlay while IFC is being parsed
+  const showInitializing   = !sceneReady && modelLoadState !== 'error'
+  const showUploadZone     = sceneReady && modelLoadState === 'idle'
   const showLoadingOverlay = sceneReady && modelLoadState === 'loading'
-
-  // Show error overlay only on explicit error
-  const showErrorOverlay = modelLoadState === 'error'
+  const showErrorOverlay   = modelLoadState === 'error'
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#070B0F' }}>
@@ -5216,23 +5284,34 @@ export default function IFCViewer() {
           </div>
 
           <div className="viewer-legend">
-            <div className="viewer-legend__title">Element Status</div>
-            <div className="legend-item">
-              <div className="legend-swatch" style={{ background: '#2ECC71' }} />
-              Completed
+            <div className="viewer-legend__title">
+              {isSimulationActive ? 'Element Status' : 'IFC Appearance'}
             </div>
-            <div className="legend-item">
-              <div className="legend-swatch" style={{ background: '#2F6BFF' }} />
-              Active / In-Progress
-            </div>
-            <div className="legend-item">
-              <div className="legend-swatch" style={{ background: '#B0B0B0' }} />
-              Upcoming
-            </div>
-            <div className="legend-item">
-              <div className="legend-swatch" style={{ background: '#FFD700' }} />
-              Selected
-            </div>
+            {isSimulationActive ? (
+              <>
+                <div className="legend-item">
+                  <div className="legend-swatch" style={{ background: '#2ECC71' }} />
+                  Completed
+                </div>
+                <div className="legend-item">
+                  <div className="legend-swatch" style={{ background: '#2F6BFF' }} />
+                  Active / In-Progress
+                </div>
+                <div className="legend-item">
+                  <div className="legend-swatch" style={{ background: '#B0B0B0' }} />
+                  Upcoming
+                </div>
+                <div className="legend-item">
+                  <div className="legend-swatch" style={{ background: '#FFD700' }} />
+                  Selected
+                </div>
+              </>
+            ) : (
+              <div className="legend-item" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                Original IFC colors active.<br />
+                Start simulation to see construction status.
+              </div>
+            )}
           </div>
         </>
       )}
@@ -5371,14 +5450,17 @@ import { formatDisplayDate } from '../utils/date.utils'
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
 export default function TimelineSlider() {
-  const progress         = useSimulationStore(s => s.progress)
-  const currentDate      = useSimulationStore(s => s.currentDate)
-  const isPlaying        = useSimulationStore(s => s.isPlaying)
-  const setProgress      = useSimulationStore(s => s.setProgress)
-  const setPlaying       = useSimulationStore(s => s.setPlaying)
-  const tick             = useSimulationStore(s => s.tick)
-  const computeAllFrames = useSimulationStore(s => s.computeAllFrames)
-  const activities       = useActivityStore(s => s.activities)
+  const progress             = useSimulationStore(s => s.progress)
+  const currentDate          = useSimulationStore(s => s.currentDate)
+  const isPlaying            = useSimulationStore(s => s.isPlaying)
+  const isSimulationActive   = useSimulationStore(s => s.isSimulationActive)
+  const setProgress          = useSimulationStore(s => s.setProgress)
+  const setPlaying           = useSimulationStore(s => s.setPlaying)
+  const activateSimulation   = useSimulationStore(s => s.activateSimulation)
+  const deactivateSimulation = useSimulationStore(s => s.deactivateSimulation)
+  const tick                 = useSimulationStore(s => s.tick)
+  const computeAllFrames     = useSimulationStore(s => s.computeAllFrames)
+  const activities           = useActivityStore(s => s.activities)
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -5397,14 +5479,51 @@ export default function TimelineSlider() {
   const counts = { completed: 0, active: 0, future: 0 }
   frames.forEach(frame => { counts[frame.status]++ })
 
+  // ── Handlers ─────────────────────────────────────────────
+
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      // Pause: stop auto-advance but keep simulation colors visible
+      setPlaying(false)
+    } else {
+      // Play: activate simulation + start auto-advance
+      // setPlaying(true) in the store also sets isSimulationActive = true
+      setPlaying(true)
+    }
+  }
+
+  const handleReset = () => {
+    // Stop playback and deactivate simulation — restores original IFC materials
+    deactivateSimulation()
+    setProgress(0)
+  }
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Dragging the slider = user is exploring the timeline = simulation is active
+    setPlaying(false)
+    activateSimulation()
+    setProgress(Number(e.target.value))
+  }
+
   return (
     <div className="timeline-panel">
       <div className="timeline-top">
         <span className="timeline-label">4D Timeline Control</span>
 
+        {/* Reset button — returns to original IFC appearance */}
+        <button
+          className="play-btn"
+          onClick={handleReset}
+          title="Reset simulation — restore original IFC colors"
+          style={{ fontSize: 14, opacity: isSimulationActive ? 1 : 0.4 }}
+        >
+          ⏮
+        </button>
+
+        {/* Play / Pause button */}
         <button
           className={`play-btn${isPlaying ? ' playing' : ''}`}
-          onClick={() => setPlaying(!isPlaying)}
+          onClick={handlePlayPause}
           title={isPlaying ? 'Pause simulation' : 'Play simulation'}
         >
           {isPlaying ? '⏸' : '▶'}
@@ -5420,10 +5539,7 @@ export default function TimelineSlider() {
               min={0}
               max={100}
               value={progress}
-              onChange={e => {
-                setPlaying(false)
-                setProgress(Number(e.target.value))
-              }}
+              onChange={handleSliderChange}
             />
           </div>
           <div className="timeline-months">
@@ -5452,10 +5568,18 @@ export default function TimelineSlider() {
             <span className="timeline-pill__count" style={{ color: '#B0B0B0' }}>{counts.future}</span>
           </div>
           <div className="timeline-pill" style={{ marginLeft: 'auto' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Progress</span>
-            <span className="timeline-pill__count" style={{ color: 'var(--accent-blue)' }}>
-              {Math.round(progress)}%
-            </span>
+            {isSimulationActive ? (
+              <>
+                <span style={{ color: 'var(--text-secondary)' }}>Progress</span>
+                <span className="timeline-pill__count" style={{ color: 'var(--accent-blue)' }}>
+                  {Math.round(progress)}%
+                </span>
+              </>
+            ) : (
+              <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                IFC original colors active
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -6164,15 +6288,11 @@ export class SimulationEngine {
 FILE: src\features\viewer\IFCUploadZone.tsx
 ====================================================================================================
 
-/**
- * IFCUploadZone — Drag-and-drop or click-to-upload IFC file UI.
- *
- * Fix: call setIFCObjects with the parsed result BEFORE setModelLoadState('loaded')
- * so the UI reads the correct count on first render after load.
- */
-
 import { useRef, useState, useCallback, type DragEvent } from 'react'
 import { useViewerStore } from '../../store/viewer.store'
+import { useSelectionStore } from '../../store/selection.store'
+import { useSimulationStore } from '../../store/simulation.store'
+import { useLayerStore } from '../../store/layer.store'
 import { IFCParserService } from '../../services/ifc/IFCParserService'
 import type { ViewerEngine } from '../../viewer/ViewerEngine'
 
@@ -6181,17 +6301,23 @@ interface IFCUploadZoneProps {
 }
 
 export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
-  const inputRef               = useRef<HTMLInputElement>(null)
+  const inputRef                    = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const setModelLoadState = useViewerStore(s => s.setModelLoadState)
-  const setModelError     = useViewerStore(s => s.setModelError)
-  const setIFCObjects     = useViewerStore(s => s.setIFCObjects)
-  const setModelMeta      = useViewerStore(s => s.setModelMeta)
-  const modelLoadState    = useViewerStore(s => s.modelLoadState)
-  const modelError        = useViewerStore(s => s.modelError)
-  const sceneReady        = useViewerStore(s => s.sceneReady)
-  const resetModel        = useViewerStore(s => s.resetModel)
+  // Viewer store
+  const setModelLoadState   = useViewerStore(s => s.setModelLoadState)
+  const setModelError       = useViewerStore(s => s.setModelError)
+  const setIFCObjects       = useViewerStore(s => s.setIFCObjects)
+  const setModelMeta        = useViewerStore(s => s.setModelMeta)
+  const modelLoadState      = useViewerStore(s => s.modelLoadState)
+  const modelError          = useViewerStore(s => s.modelError)
+  const sceneReady          = useViewerStore(s => s.sceneReady)
+  const resetModel          = useViewerStore(s => s.resetModel)
+
+  // Cross-store cleanup for model replacement
+  const clearSelection       = useSelectionStore(s => s.clearSelection)
+  const deactivateSimulation = useSimulationStore(s => s.deactivateSimulation)
+  const clearLayerFilters    = useLayerStore(s => s.clearFilters)
 
   const handleFile = useCallback(async (file: File) => {
     if (!viewerEngine || !sceneReady) {
@@ -6200,11 +6326,30 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
       return
     }
 
-    // Set loading state first
+    // ── Step 1: Unload the previous 3D model ─────────────────
+    // model.dispose() frees the worker thread slot, shared
+    // MaterialManager entries, GPU tile geometry, and removes
+    // model.object from the Three.js scene.
+    // Must happen before store resets so colour/selection effects
+    // that read loadedModels do not fire against stale data.
+    try {
+      await viewerEngine.unloadAll()
+    } catch (err) {
+      console.warn('[IFCUploadZone] unloadAll warning:', err)
+      // Non-fatal — proceed with load
+    }
+
+    // ── Step 2: Clear all application state ──────────────────
+    clearSelection()          // Inspector empties, Gantt deselects
+    deactivateSimulation()    // Removes simulation colour overlay
+    clearLayerFilters()       // Resets layer filter panel
+
+    // ── Step 3: Transition to loading state ──────────────────
     setModelLoadState('loading')
     setModelError(null)
     setModelMeta(file.name, file.size)
 
+    // ── Step 4: Parse and load ────────────────────────────────
     const parser = new IFCParserService(viewerEngine)
     const result = await parser.parseFile(file)
 
@@ -6215,8 +6360,8 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
     }
 
     // IMPORTANT: set ifcObjects BEFORE setting modelLoadState to 'loaded'
-    // so that any component reading ifcObjects.length on state change
-    // already has the correct value
+    // so any component reading ifcObjects.length on state change
+    // already has the correct value.
     setIFCObjects(result.ifcObjects)
     setModelLoadState('loaded')
 
@@ -6224,7 +6369,17 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
       console.warn('[IFCUploadZone] Partial success:', result.error)
     }
 
-  }, [viewerEngine, sceneReady, setModelLoadState, setModelError, setModelMeta, setIFCObjects])
+  }, [
+    viewerEngine,
+    sceneReady,
+    setModelLoadState,
+    setModelError,
+    setModelMeta,
+    setIFCObjects,
+    clearSelection,
+    deactivateSimulation,
+    clearLayerFilters,
+  ])
 
   const handleDragOver  = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -6822,13 +6977,6 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
 FILE: src\store\simulation.store.ts
 ====================================================================================================
 
-/**
- * Simulation store — owns the 4D timeline state.
- *
- * Delegates ALL status computation to SimulationEngine.
- * React components never compute simulation status directly.
- */
-
 import { create } from 'zustand'
 import { SimulationEngine } from '../core/simulation/SimulationEngine'
 import { progressToDate } from '../utils/date.utils'
@@ -6844,14 +6992,34 @@ interface SimulationState {
   progress:      number
   /** Whether auto-play is active */
   isPlaying:     boolean
+  /**
+   * Whether the 4D simulation overlay is active.
+   *
+   * TRUE  → simulation colors (future/active/completed) are applied to the model.
+   * FALSE → IFC original materials are shown; no color override is applied.
+   *
+   * This is the master gate for the color override system.
+   * `isPlaying` only controls auto-advance of the timeline.
+   */
+  isSimulationActive: boolean
   /** Project boundary dates — will be set from loaded model in Phase 2 */
   projectStart:  Date
   projectEnd:    Date
 
   // ── Actions ──────────────────────────────────────────────
-  setProgress:      (value: number) => void
-  setPlaying:       (playing: boolean) => void
-  tick:             () => void
+  setProgress:          (value: number) => void
+  setPlaying:           (playing: boolean) => void
+  /**
+   * Activates simulation mode — applies construction status colors to the model.
+   * Call this when the user explicitly starts or resumes the 4D simulation.
+   */
+  activateSimulation:   () => void
+  /**
+   * Deactivates simulation mode — restores original IFC materials.
+   * Call this when the user stops or exits the 4D simulation.
+   */
+  deactivateSimulation: () => void
+  tick:                 () => void
 
   // ── Derived computation (delegated to SimulationEngine) ──
   getObjectStatus:  (globalId: string, activities: Activity[]) => SimulationStatus
@@ -6859,11 +7027,12 @@ interface SimulationState {
 }
 
 export const useSimulationStore = create<SimulationState>((set, get) => ({
-  currentDate:  progressToDate(35, PROJECT_START, PROJECT_END),
-  progress:     35,
-  isPlaying:    false,
-  projectStart: PROJECT_START,
-  projectEnd:   PROJECT_END,
+  currentDate:         progressToDate(35, PROJECT_START, PROJECT_END),
+  progress:            35,
+  isPlaying:           false,
+  isSimulationActive:  false,    // ← IFC original colors shown by default
+  projectStart:        PROJECT_START,
+  projectEnd:          PROJECT_END,
 
   setProgress: (value) => {
     const clamped = Math.max(0, Math.min(100, value))
@@ -6873,7 +7042,18 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
     })
   },
 
-  setPlaying: (playing) => set({ isPlaying: playing }),
+  setPlaying: (playing) => {
+    // Starting playback implicitly activates the simulation overlay
+    if (playing) {
+      set({ isPlaying: true, isSimulationActive: true })
+    } else {
+      set({ isPlaying: false })
+    }
+  },
+
+  activateSimulation: () => set({ isSimulationActive: true }),
+
+  deactivateSimulation: () => set({ isSimulationActive: false, isPlaying: false }),
 
   tick: () => {
     const { progress, setProgress, setPlaying } = get()
@@ -8109,16 +8289,6 @@ export class SelectionManager {
 FILE: src\viewer\ViewerEngine.ts
 ====================================================================================================
 
-/**
- * ViewerEngine — That Open Engine v3.x
- *
- * Fix: onModelLoaded is called AFTER extractObjects resolves in
- * IFCParserService — ViewerEngine.loadIFC no longer calls
- * onModelLoaded itself. Instead it returns the model and lets
- * IFCParserService call setIFCObjects + setModelLoadState in the
- * correct order, ensuring the UI count is never 0.
- */
-
 import * as THREE from 'three'
 import * as OBC from '@thatopen/components'
 import * as FRAGS from '@thatopen/fragments'
@@ -8132,14 +8302,20 @@ export interface ViewerEngineConfig {
   onError:        (message: string) => void
 }
 
+interface RaycastResult {
+  localId:  number
+  distance: number
+  point:    THREE.Vector3
+}
+
 interface FragmentsModelInternal {
   getLocalIds():                     Promise<number[]>
   getGuidsByLocalIds(ids: number[]): Promise<(string | null)[]>
   raycast(params: {
     camera: THREE.PerspectiveCamera | THREE.OrthographicCamera
     mouse:  THREE.Vector2
-    dom:    HTMLElement
-  }): Promise<{ localId: number } | null>
+    dom:    HTMLCanvasElement
+  }): Promise<RaycastResult | null>
 }
 
 export class ViewerEngine {
@@ -8274,8 +8450,44 @@ export class ViewerEngine {
   }
 
   // ────────────────────────────────────────────────────────
-  // Camera fit — uses fitToBox() which is the correct
-  // camera-controls API in OBC v3.x
+  // Unloads every currently loaded model and frees all
+  // associated GPU and worker resources.
+  //
+  // model.dispose() is the canonical That Open Engine API:
+  //   - Terminates the worker thread slot for this model
+  //   - Frees shared MaterialManager entries
+  //   - Removes model.object from its parent (the scene)
+  //   - Disposes tile mesh geometries
+  //
+  // Called automatically at the top of loadIFC() so that
+  // loading a second IFC always starts from a clean scene.
+  // Also exposed publicly so callers (IFCUploadZone, Layout)
+  // can clear the scene before showing the upload UI.
+  // ────────────────────────────────────────────────────────
+  async unloadAll(): Promise<void> {
+    if (this.loadedModels.length === 0) return
+
+    const toDispose = [...this.loadedModels]
+    this.loadedModels = []
+
+    for (const model of toDispose) {
+      try {
+        await model.dispose()
+      } catch (err) {
+        // Dispose errors are non-critical — log and continue
+        console.warn('[ViewerEngine] model.dispose() error:', err)
+        // Fallback: manually remove from scene if dispose() failed
+        try {
+          this.world.scene.three.remove(model.object)
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────────────────
+  // Camera fit
   // ────────────────────────────────────────────────────────
   private async fitCameraToModel(model: FRAGS.FragmentsModel): Promise<void> {
     try {
@@ -8294,13 +8506,11 @@ export class ViewerEngine {
       box.getSize(size)
       box.getCenter(center)
 
-      // Move grid to model base
       const gridY = box.min.y
       this.world.scene.three.children
         .filter(c => c instanceof THREE.GridHelper)
         .forEach(grid => { grid.position.y = gridY })
 
-      // Reposition sun light relative to model
       const maxDim = Math.max(size.x, size.y, size.z)
       this.world.scene.three.children
         .filter((c): c is THREE.DirectionalLight =>
@@ -8335,6 +8545,12 @@ export class ViewerEngine {
     }
   }
 
+  // ────────────────────────────────────────────────────────
+  // Click handler
+  // mouse carries raw client coordinates (e.clientX / e.clientY).
+  // The Fragments library's screenToCast() calls getBoundingClientRect()
+  // on the canvas and converts to NDC internally.
+  // ────────────────────────────────────────────────────────
   private handleClick = async (e: MouseEvent): Promise<void> => {
     if (!this.world || !this.fragmentsManager?.initialized) return
     if (this.loadedModels.length === 0) return
@@ -8343,32 +8559,52 @@ export class ViewerEngine {
     const domElement = this.world.renderer?.three?.domElement
     if (!domElement) return
 
+    const mouse = new THREE.Vector2(e.clientX, e.clientY)
+
     try {
-      const rect  = this.config.container.getBoundingClientRect()
-      const mouse = new THREE.Vector2(
-        e.clientX - rect.left,
-        e.clientY - rect.top
-      )
+      const candidates: Array<{ globalId: string; distance: number }> = []
 
-      for (const model of this.loadedModels) {
-        const internal = model as unknown as FragmentsModelInternal
-        const result   = await internal.raycast({
-          camera: this.world.camera.three as THREE.PerspectiveCamera,
-          mouse,
-          dom:    domElement,
-        })
+      await Promise.all(
+        this.loadedModels.map(async (model) => {
+          const internal = model as unknown as FragmentsModelInternal
+          let result: RaycastResult | null = null
 
-        if (result && result.localId !== undefined) {
-          const guids    = await internal.getGuidsByLocalIds([result.localId])
-          const globalId = guids[0]
-          if (typeof globalId === 'string' && globalId.length > 0) {
-            this.config.onObjectPicked(globalId, isMulti)
+          try {
+            result = await internal.raycast({
+              camera: this.world.camera.three as THREE.PerspectiveCamera,
+              mouse,
+              dom:    domElement as HTMLCanvasElement,
+            })
+          } catch {
             return
           }
-        }
+
+          if (!result || result.localId === undefined) return
+
+          let guids: (string | null)[] = []
+          try {
+            guids = await internal.getGuidsByLocalIds([result.localId])
+          } catch {
+            return
+          }
+
+          const globalId = guids[0]
+          if (typeof globalId !== 'string' || globalId.length === 0) return
+
+          candidates.push({
+            globalId,
+            distance: result.distance ?? Infinity,
+          })
+        })
+      )
+
+      if (candidates.length === 0) {
+        this.config.onObjectPicked(null, false)
+        return
       }
 
-      this.config.onObjectPicked(null, false)
+      candidates.sort((a, b) => a.distance - b.distance)
+      this.config.onObjectPicked(candidates[0].globalId, isMulti)
 
     } catch {
       this.config.onObjectPicked(null, false)
@@ -8376,9 +8612,9 @@ export class ViewerEngine {
   }
 
   /**
-   * Loads an IFC buffer, adds it to the scene, fits the camera.
+   * Unloads any existing model, then loads the given IFC buffer.
    * Does NOT call onModelLoaded — that is done by IFCParserService
-   * after extractObjects() completes, ensuring count is correct.
+   * after extractObjects() completes, ensuring count is never 0.
    */
   async loadIFC(
     buffer:   Uint8Array,
@@ -8390,14 +8626,13 @@ export class ViewerEngine {
       )
     }
 
+    // Always start from a clean scene — dispose previous model first
+    await this.unloadAll()
+
     try {
       const model = await this.ifcLoader.load(buffer, true, fileName)
-
-      // Fit camera to the loaded model
       await this.fitCameraToModel(model)
-
       return model
-
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to parse IFC file'
       this.config.onError(msg)

@@ -69,6 +69,13 @@ export class ViewerEngine {
       // ── 2. Boot engine ────────────────────────────────────
       this.components.init()
 
+      // ── 2b. Remove "That Open Company" branding ───────────
+      // SimpleRenderer injects a branding overlay element into the container
+      // after init(). We remove it by targeting the known element attributes.
+      // This does NOT modify any library source; it only removes a DOM node
+      // that the library itself appended to our container div.
+      this.removeBranding()
+
       // ── 3. Scene ──────────────────────────────────────────
       this.world.scene.setup()
       this.world.scene.three.background = new THREE.Color(0x070B0F)
@@ -155,6 +162,65 @@ export class ViewerEngine {
       const msg = err instanceof Error ? err.message : 'Viewer failed to initialize'
       this.config.onError(msg)
       throw err
+    }
+  }
+
+  /**
+   * Removes the "That Open Company" branding overlay injected by SimpleRenderer.
+   *
+   * @thatopen/components SimpleRenderer appends a small <div> watermark to
+   * the container element after components.init(). This method removes it by
+   * scanning the container's direct children for the known branding element
+   * (identified by its style characteristics or data attributes).
+   *
+   * We do NOT modify library source — only our own container's DOM children.
+   * Called immediately after components.init() so the element is already present.
+   */
+  private removeBranding(): void {
+    try {
+      const container = this.config.container
+
+      // The branding element is a direct child <div> of the container
+      // with fixed positioning and a low z-index watermark.
+      // OBC v3.x injects it with id="thatopen-logo" or a known class.
+      // We target any of the known selectors defensively.
+      const selectors = [
+        '#thatopen-logo',
+        '[id*="thatopen"]',
+        '[class*="thatopen"]',
+        '[id*="that-open"]',
+        '[class*="that-open"]',
+        // Fallback: any anchor linking to thatopen.com injected by the library
+        'a[href*="thatopen.com"]',
+      ]
+
+      for (const selector of selectors) {
+        container.querySelectorAll(selector).forEach(el => {
+          el.remove()
+          console.log(`[ViewerEngine] Removed branding element matching: ${selector}`)
+        })
+      }
+
+      // Also scan direct children for any <div> or <a> injected after the canvas
+      // that links to the That Open Company website
+      Array.from(container.children).forEach(child => {
+        const tagName = child.tagName.toLowerCase()
+        if (tagName === 'canvas') return // keep the canvas
+
+        const html = child.outerHTML.toLowerCase()
+        if (
+          html.includes('thatopen') ||
+          html.includes('that open') ||
+          html.includes('thatopen.com')
+        ) {
+          child.remove()
+          console.log('[ViewerEngine] Removed branding element via content scan')
+        }
+      })
+
+    } catch (err) {
+      // Non-critical: if removal fails the branding may appear but the viewer works
+      console.warn('[ViewerEngine] removeBranding failed:', err)
     }
   }
 
