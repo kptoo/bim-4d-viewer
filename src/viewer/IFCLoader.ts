@@ -1,27 +1,34 @@
 import * as FRAGS from '@thatopen/fragments'
 import { ifcCategoryMap, ifcClasses } from '@thatopen/fragments'
-import type { IFCObject, IFCProperty } from '../types'
+import type { IFCObject, IFCProperty, IFCSpatialNode, IFCSpatialTree } from '../types'
 import { mapRawArrayToIFCObjects } from '../core/ifc/IFCObjectMapper'
 
-// ─── Build the physical-product category regex list at module load time ───────
-//
-// ifcClasses.elements is a Set<number> of numeric IFC type codes covering all
-// 147 physical product types (walls, doors, slabs, MEP, structure, etc.) as
-// defined in the IFC schema.  ifcCategoryMap maps those codes to their
-// uppercase string names (e.g. 159607094 → "IFCWALL").
+// ─── Category regexp lists ────────────────────────────────────────────────────
 
 const ELEMENT_CATEGORY_REGEXPS: RegExp[] = (() => {
   const regexps: RegExp[] = []
   for (const typeCode of ifcClasses.elements) {
     const name = ifcCategoryMap[typeCode as unknown as number]
-    if (name) {
-      regexps.push(new RegExp(`^${name}$`, 'i'))
-    }
+    if (name) regexps.push(new RegExp(`^${name}$`, 'i'))
   }
   return regexps
 })()
 
-// ─── Reverse-map: numeric type code (as string) → uppercase IFC name ─────────
+const SPATIAL_CATEGORY_REGEXPS: RegExp[] = [
+  /^IFCPROJECT$/i,
+  /^IFCSITE$/i,
+  /^IFCBUILDING$/i,
+  /^IFCBUILDINGSTOREY$/i,
+  /^IFCSPACE$/i,
+]
+
+// Also fetch openings so we can resolve void/fill relationships
+const OPENING_CATEGORY_REGEXPS: RegExp[] = [
+  /^IFCOPENINGELEMENT$/i,
+  /^IFCVIRTUALELEMENT$/i,
+]
+
+// ─── Reverse-map: numeric type code → uppercase IFC name ─────────────────────
 
 const NUMERIC_CODE_TO_NAME: Map<string, string> = (() => {
   const m = new Map<string, string>()
@@ -33,118 +40,71 @@ const NUMERIC_CODE_TO_NAME: Map<string, string> = (() => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Converts a raw category key to a PascalCase IFC type string.
- *   "IFCWALLSTANDARDCASE" → "IfcWallStandardCase"
- *   "659739252"           → resolves via ifcCategoryMap then converts
- */
 function categoryKeyToIfcType(rawKey: string): string {
   let upperName = rawKey.toUpperCase()
   if (/^\d+$/.test(rawKey)) {
     upperName = NUMERIC_CODE_TO_NAME.get(rawKey) ?? 'IFCBUILDINGELEMENTPROXY'
   }
-  if (!upperName.startsWith('IFC')) {
-    return upperName
-  }
+  if (!upperName.startsWith('IFC')) return upperName
   return upperName.charAt(0).toUpperCase() + upperName.slice(1).toLowerCase()
 }
 
-/**
- * Universal IFC value unwrapper — handles every shape returned by this build.
- *
- * ALL fields in the item object — including _guid, _localId, _category, Name,
- * ObjectType, Tag, Description — are wrapped as { value: <primitive> }.
- * None are bare primitives.
- *
- * Shapes handled:
- *   { value: "string" }                     → "string"
- *   { value: { value: "string", type: x } } → "string"  (nested wrap)
- *   "string"                                → "string"  (rare bare primitive)
- *   42                                      → "42"       (rare bare number)
- *   anything else / null                    → null
- *
- * Returns a trimmed non-empty string, or null.
- */
 function unwrapString(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null
-
-  // Bare primitive fallback (safe to handle even if not the normal case)
-  if (typeof raw === 'string') {
-    const s = raw.trim()
-    return s.length > 0 ? s : null
-  }
-  if (typeof raw === 'number') return String(raw)
+  if (typeof raw === 'string')  { const s = raw.trim(); return s.length > 0 ? s : null }
+  if (typeof raw === 'number')  return String(raw)
   if (typeof raw === 'boolean') return String(raw)
+  if (typeof raw !== 'object')  return null
 
-  if (typeof raw !== 'object') return null
-
-  // Standard wrapper: { value: x, type?: ... }
   let v = (raw as Record<string, unknown>)['value']
-
-  // One level of nesting: { value: { value: x, type: ... }, type: ... }
   if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
     v = (v as { value: unknown }).value
   }
-
-  if (typeof v === 'string') {
-    const s = v.trim()
-    return s.length > 0 ? s : null
-  }
-  if (typeof v === 'number') return String(v)
+  if (typeof v === 'string')  { const s = v.trim(); return s.length > 0 ? s : null }
+  if (typeof v === 'number')  return String(v)
+  if (typeof v === 'boolean') return String(v)
   return null
 }
 
-/**
- * Same as unwrapString but returns a number for numeric IFC values.
- * Used for _localId which must be kept as a number for expressId.
- *
- * Returns a number, or undefined.
- */
 function unwrapNumber(raw: unknown): number | undefined {
   if (raw === null || raw === undefined) return undefined
   if (typeof raw === 'number') return raw
-
   if (typeof raw !== 'object') return undefined
 
   let v = (raw as Record<string, unknown>)['value']
-
   if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
     v = (v as { value: unknown }).value
   }
-
   if (typeof v === 'number') return v
-  if (typeof v === 'string') {
-    const n = Number(v)
-    return isNaN(n) ? undefined : n
-  }
+  if (typeof v === 'string') { const n = Number(v); return isNaN(n) ? undefined : n }
   return undefined
 }
 
-/**
- * Reads and unwraps a named field from an item record.
- * Thin wrapper around unwrapString for named-key access.
- */
-function readAttr(
-  data: Record<string, unknown>,
-  key: string
-): string | null {
+function unwrapScalar(raw: unknown): string | number | boolean | null {
+  if (raw === null || raw === undefined) return null
+  if (typeof raw === 'string')  return raw.trim() || null
+  if (typeof raw === 'number')  return raw
+  if (typeof raw === 'boolean') return raw
+  if (typeof raw !== 'object')  return null
+
+  let v = (raw as Record<string, unknown>)['value']
+  if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
+    v = (v as { value: unknown }).value
+  }
+  if (typeof v === 'string')  return v.trim() || null
+  if (typeof v === 'number')  return v
+  if (typeof v === 'boolean') return v
+  return null
+}
+
+function readAttr(data: Record<string, unknown>, key: string): string | null {
   return unwrapString(data[key])
 }
 
-/**
- * Extracts IFCProperty entries from the IsDefinedBy relation tree.
- *
- * IFC traversal path:
- *   item['IsDefinedBy']                  → ItemData[]
- *     rel['RelatingPropertyDefinition']  → ItemData (IfcPropertySet)
- *       pset['Name']                     → Pset name
- *       pset['HasProperties']            → ItemData[] (IfcPropertySingleValue)
- *         prop['Name']                   → property name
- *         prop['NominalValue']           → property value
- */
+// ─── Pset / quantity extraction ───────────────────────────────────────────────
+
 function extractPsets(itemData: Record<string, unknown>): IFCProperty[] {
   const props: IFCProperty[] = []
-
   const isDefinedBy = itemData['IsDefinedBy']
   if (!Array.isArray(isDefinedBy)) return props
 
@@ -154,82 +114,459 @@ function extractPsets(itemData: Record<string, unknown>): IFCProperty[] {
     const psetEntry = rel['RelatingPropertyDefinition']
     if (!psetEntry || typeof psetEntry !== 'object') continue
 
-    const pset = psetEntry as Record<string, unknown>
+    const pset     = psetEntry as Record<string, unknown>
     const psetName = readAttr(pset, 'Name') ?? 'UnknownPset'
 
+    // Branch A: IfcPropertySet → HasProperties
     const hasProperties = pset['HasProperties']
-    if (!Array.isArray(hasProperties)) continue
+    if (Array.isArray(hasProperties)) {
+      for (const propEntry of hasProperties as Record<string, unknown>[]) {
+        if (!propEntry || typeof propEntry !== 'object') continue
+        const prop     = propEntry as Record<string, unknown>
+        const propName = readAttr(prop, 'Name')
+        if (!propName) continue
 
-    for (const propEntry of hasProperties as Record<string, unknown>[]) {
-      if (!propEntry || typeof propEntry !== 'object') continue
-      const prop = propEntry as Record<string, unknown>
+        const nomRaw = prop['NominalValue']
+        let propValue: string | number | boolean | null = null
 
-      const propName = readAttr(prop, 'Name')
-      if (!propName) continue
-
-      // NominalValue may itself be a wrapped IFC value of any scalar type
-      const nomRaw = prop['NominalValue']
-      let propValue: string | number | boolean | null = null
-
-      if (nomRaw !== null && nomRaw !== undefined) {
-        let v: unknown = nomRaw
-        if (typeof v === 'object' && 'value' in (v as object)) {
-          v = (v as { value: unknown }).value
+        if (nomRaw !== null && nomRaw !== undefined) {
+          propValue = unwrapScalar(nomRaw)
+          if (propValue === null && typeof nomRaw === 'object') {
+            const inner = (nomRaw as Record<string, unknown>)['value']
+            if (typeof inner === 'object' && inner !== null && 'value' in (inner as object)) {
+              propValue = unwrapScalar((inner as { value: unknown }).value)
+            } else {
+              propValue = unwrapScalar(inner)
+            }
+          }
         }
-        if (typeof v === 'object' && v !== null && 'value' in (v as object)) {
-          v = (v as { value: unknown }).value
-        }
-        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-          propValue = v
-        } else if (v !== null && v !== undefined) {
-          propValue = String(v)
-        }
+
+        props.push({ set: psetName, name: propName, value: propValue })
       }
+      continue
+    }
 
-      props.push({ set: psetName, name: propName, value: propValue })
+    // Branch B: IfcElementQuantity → Quantities
+    const quantities = pset['Quantities']
+    if (Array.isArray(quantities)) {
+      const QTY_VALUE_KEYS = ['LengthValue','AreaValue','VolumeValue','WeightValue','CountValue','TimeValue']
+      for (const qEntry of quantities as Record<string, unknown>[]) {
+        if (!qEntry || typeof qEntry !== 'object') continue
+        const q     = qEntry as Record<string, unknown>
+        const qName = readAttr(q, 'Name')
+        if (!qName) continue
+
+        let qValue: string | number | boolean | null = null
+        for (const key of QTY_VALUE_KEYS) {
+          const raw = q[key]
+          if (raw !== null && raw !== undefined) {
+            const n = unwrapNumber(raw)
+            if (n !== undefined) { qValue = n; break }
+          }
+        }
+
+        const unitString = q['Unit'] ? unwrapString(q['Unit']) : undefined
+        props.push({ set: psetName, name: qName, value: qValue, ...(unitString ? { unit: unitString } : {}) })
+      }
     }
   }
 
   return props
 }
 
+// ─── Raw item type ────────────────────────────────────────────────────────────
+
+type RawItem = Record<string, unknown>
+
+/**
+ * Safely iterate the items returned by getItemsData.
+ * The API returns either an array or a keyed-by-localId object.
+ */
+function iterateRawItems(raw: unknown): RawItem[] {
+  if (Array.isArray(raw)) {
+    return (raw as unknown[]).filter(
+      (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
+    )
+  }
+  if (raw !== null && typeof raw === 'object') {
+    return Object.values(raw as Record<string, unknown>).filter(
+      (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
+    )
+  }
+  return []
+}
+
+// ─── Spatial tree extraction ──────────────────────────────────────────────────
+
+/**
+ * Builds the IFCSpatialTree from the loaded FragmentsModel.
+ *
+ * FIXED: That Open Engine stores relations as direct object references.
+ *
+ * item['IsDecomposedBy']  = [ <child spatial node item>, ... ]
+ * item['ContainsElements'] = [ <contained physical element item>, ... ]
+ * item['HasOpenings']      = [ <opening element item>, ... ]    (on walls etc.)
+ * item['HasFillings']      = [ <door/window item>, ... ]        (on openings)
+ *
+ * There is NO intermediate IfcRelAggregates object — the library resolved
+ * it to the direct related items when building the fragment binary.
+ */
+async function extractSpatialTree(model: FRAGS.FragmentsModel): Promise<IFCSpatialTree> {
+  const empty: IFCSpatialTree = {
+    rootIds:           [],
+    spatialNodes:      new Map(),
+    elementsByStorey:  new Map(),
+    storeyByElement:   new Map(),
+    elementToOpenings: new Map(),
+    openingToFillers:  new Map(),
+    openingDetails:    new Map(),
+  }
+
+  // ── Step 1: localIds for spatial structure types ──────────────────────────
+  let spatialCatMap: Record<string, number[]> = {}
+  try {
+    spatialCatMap = await (model as unknown as {
+      getItemsOfCategories(r: RegExp[]): Promise<Record<string, number[]>>
+    }).getItemsOfCategories(SPATIAL_CATEGORY_REGEXPS)
+  } catch (err) {
+    console.warn('[IFCLoader] getItemsOfCategories (spatial) failed:', err)
+    return empty
+  }
+
+  const spatialLocalIds: number[] = []
+  const spatialLocalIdToType = new Map<number, string>()
+
+  for (const [cat, ids] of Object.entries(spatialCatMap)) {
+    for (const id of ids) {
+      spatialLocalIds.push(id)
+      spatialLocalIdToType.set(id, cat)
+    }
+  }
+
+  if (spatialLocalIds.length === 0) {
+    console.warn('[IFCLoader] No spatial structure entities found in model')
+    return empty
+  }
+
+  console.log(`[IFCLoader] Found ${spatialLocalIds.length} spatial entities`)
+
+  // ── Step 2: Fetch spatial nodes with their relations ──────────────────────
+  //
+  // Relation keys (confirmed from @thatopen/fragments 3.4.6 source):
+  //   IsDecomposedBy   → direct array of child spatial node items
+  //   ContainsElements → direct array of contained physical element items
+  //
+  // Values are already-expanded item data objects, NOT intermediate rel entities.
+  //
+  let spatialDataRaw: unknown = {}
+  try {
+    spatialDataRaw = await (model as unknown as {
+      getItemsData(
+        ids:    number[],
+        config: {
+          attributesDefault: boolean
+          relations: Record<string, { attributes: boolean; relations: boolean }>
+        }
+      ): Promise<unknown>
+    }).getItemsData(spatialLocalIds, {
+      attributesDefault: true,
+      relations: {
+        IsDecomposedBy:   { attributes: true, relations: false },
+        ContainsElements: { attributes: true, relations: false },
+      },
+    })
+  } catch (err) {
+    console.warn('[IFCLoader] getItemsData (spatial) failed:', err)
+    return empty
+  }
+
+  const spatialItems = iterateRawItems(spatialDataRaw)
+
+  if (spatialItems.length === 0) {
+    console.warn('[IFCLoader] getItemsData returned 0 spatial items')
+    return empty
+  }
+
+  // ── Step 3: Instrument — print raw keys for first item ───────────────────
+  {
+    const first = spatialItems[0]
+    const cat   = unwrapString(first['_category']) ?? '?'
+    const guid  = unwrapString(first['_guid']) ?? '?'
+    const keys  = Object.keys(first)
+    console.log(`[IFCLoader] First spatial item: category=${cat} guid=${guid}`)
+    console.log(`[IFCLoader] First spatial item keys: [${keys.join(', ')}]`)
+    if (Array.isArray(first['IsDecomposedBy'])) {
+      console.log(`[IFCLoader] IsDecomposedBy count: ${(first['IsDecomposedBy'] as unknown[]).length}`)
+      const child0 = (first['IsDecomposedBy'] as RawItem[])[0]
+      if (child0) console.log(`[IFCLoader] IsDecomposedBy[0] keys: [${Object.keys(child0).join(', ')}]`)
+    } else {
+      console.log(`[IFCLoader] IsDecomposedBy: not an array →`, typeof first['IsDecomposedBy'])
+    }
+    if (Array.isArray(first['ContainsElements'])) {
+      console.log(`[IFCLoader] ContainsElements count: ${(first['ContainsElements'] as unknown[]).length}`)
+    }
+  }
+
+  // ── Step 4: Build spatial node map ───────────────────────────────────────
+  const spatialNodes = new Map<string, IFCSpatialNode>()
+
+  for (const item of spatialItems) {
+    const globalId = unwrapString(item['_guid'])
+    if (!globalId) continue
+
+    const expressId = unwrapNumber(item['_localId'])
+    const rawCat    = unwrapString(item['_category'])
+      ?? (expressId !== undefined ? spatialLocalIdToType.get(expressId) : undefined)
+      ?? 'IFCBUILDINGELEMENTPROXY'
+    const ifcType   = categoryKeyToIfcType(rawCat)
+    const name      = readAttr(item, 'Name') ?? ifcType
+
+    spatialNodes.set(globalId, {
+      globalId,
+      expressId,
+      name,
+      ifcType,
+      childGlobalIds: [],   // populated in Step 5
+    })
+  }
+
+  // ── Step 5: Resolve relationships ─────────────────────────────────────────
+  //
+  // IsDecomposedBy items ARE the child spatial nodes directly.
+  // ContainsElements items ARE the physical elements directly.
+  //
+  const elementsByStorey = new Map<string, string[]>()
+  const storeyByElement  = new Map<string, string>()
+
+  let aggregateCount    = 0
+  let containmentCount  = 0
+
+  for (const item of spatialItems) {
+    const parentGlobalId = unwrapString(item['_guid'])
+    if (!parentGlobalId) continue
+
+    const parentNode = spatialNodes.get(parentGlobalId)
+    if (!parentNode) continue
+
+    // ── IsDecomposedBy → child spatial nodes (FIXED) ─────────────────────
+    // Each entry in this array IS a child spatial node item.
+    const isDecomposedBy = item['IsDecomposedBy']
+    if (Array.isArray(isDecomposedBy)) {
+      for (const childItem of isDecomposedBy as RawItem[]) {
+        if (!childItem || typeof childItem !== 'object') continue
+        const childGlobalId = unwrapString(childItem['_guid'])
+        if (!childGlobalId) continue
+        if (!parentNode.childGlobalIds.includes(childGlobalId)) {
+          parentNode.childGlobalIds.push(childGlobalId)
+          aggregateCount++
+        }
+      }
+    }
+
+    // ── ContainsElements → physical elements (FIXED) ─────────────────────
+    // Each entry IS a physical element item.
+    const containsElements = item['ContainsElements']
+    if (Array.isArray(containsElements)) {
+      if (!elementsByStorey.has(parentGlobalId)) {
+        elementsByStorey.set(parentGlobalId, [])
+      }
+      const bucket = elementsByStorey.get(parentGlobalId)!
+
+      for (const elItem of containsElements as RawItem[]) {
+        if (!elItem || typeof elItem !== 'object') continue
+        const elGlobalId = unwrapString(elItem['_guid'])
+        if (!elGlobalId) continue
+        bucket.push(elGlobalId)
+        storeyByElement.set(elGlobalId, parentGlobalId)
+        containmentCount++
+      }
+    }
+  }
+
+  // ── Step 6: Identify root nodes ────────────────────────────────────────────
+  // A root node has no parent — i.e. no other spatial node's childGlobalIds includes it.
+  const nonRootIds = new Set<string>()
+  for (const node of spatialNodes.values()) {
+    for (const childId of node.childGlobalIds) {
+      nonRootIds.add(childId)
+    }
+  }
+
+  const rootIds: string[] = []
+  for (const globalId of spatialNodes.keys()) {
+    if (!nonRootIds.has(globalId)) rootIds.push(globalId)
+  }
+
+  // ── Step 7: Debug summary ─────────────────────────────────────────────────
+  const orphanCount = Array.from(spatialNodes.keys()).filter(
+    id => !rootIds.includes(id) && !nonRootIds.has(id)
+  ).length
+
+  console.log('\n[IFCLoader] ── Relationship graph ──────────────────────────────────')
+  for (const node of spatialNodes.values()) {
+    if (node.childGlobalIds.length > 0) {
+      console.log(`  ${node.ifcType} "${node.name}"`)
+      for (const childId of node.childGlobalIds) {
+        const child = spatialNodes.get(childId)
+        console.log(`      → ${child?.ifcType ?? '?'} "${child?.name ?? childId}"`)
+      }
+    }
+    const contained = elementsByStorey.get(node.globalId)
+    if (contained && contained.length > 0) {
+      console.log(`  ${node.ifcType} "${node.name}" contains:`)
+      const byType = new Map<string, number>()
+      for (const gid of contained) {
+        // We don't have type info here since elements are in a separate pass
+        // Just count
+        byType.set(gid, (byType.get(gid) ?? 0) + 1)
+      }
+      console.log(`      ${contained.length} elements`)
+    }
+  }
+
+  console.log('\n[IFCLoader] ── Spatial tree summary ────────────────────────────────')
+  console.log(`  Spatial nodes:               ${spatialNodes.size}`)
+  console.log(`  Root nodes:                  ${rootIds.length}`)
+  console.log(`  Orphan nodes:                ${orphanCount}`)
+  console.log(`  IfcRelAggregates resolved:   ${aggregateCount}`)
+  console.log(`  ContainsElements resolved:   ${containmentCount}`)
+  console.log(`  Storeys with elements:       ${elementsByStorey.size}`)
+  for (const rootId of rootIds) {
+    const root = spatialNodes.get(rootId)
+    console.log(`  Root: ${root?.ifcType} "${root?.name}"`)
+  }
+  console.log('')
+
+  return {
+    rootIds,
+    spatialNodes,
+    elementsByStorey,
+    storeyByElement,
+    elementToOpenings: new Map(),   // populated by extractVoidFillRelations()
+    openingToFillers:  new Map(),
+    openingDetails:    new Map(),
+  }
+}
+
+// ─── Opening/void extraction ──────────────────────────────────────────────────
+
+/**
+ * For each physical element, fetches HasOpenings (voids in walls/slabs)
+ * and for each opening, fetches HasFillings (doors/windows).
+ *
+ * Returns:
+ *   elementToOpenings: Map<elementGlobalId, openingGlobalId[]>
+ *   openingToFillers:  Map<openingGlobalId, fillerGlobalId[]>
+ *   openingDetails:    Map<openingGlobalId, { name, ifcType }>
+ */
+async function extractVoidFillRelations(
+  model:        FRAGS.FragmentsModel,
+  elementGlobalIds: string[]
+): Promise<{
+  elementToOpenings: Map<string, string[]>
+  openingToFillers:  Map<string, string[]>
+  openingDetails:    Map<string, { name: string; ifcType: string }>
+}> {
+  const elementToOpenings = new Map<string, string[]>()
+  const openingToFillers  = new Map<string, string[]>()
+  const openingDetails    = new Map<string, { name: string; ifcType: string }>()
+
+  if (elementGlobalIds.length === 0) {
+    return { elementToOpenings, openingToFillers, openingDetails }
+  }
+
+  // Get localIds for openings separately
+  let openingCatMap: Record<string, number[]> = {}
+  try {
+    openingCatMap = await (model as unknown as {
+      getItemsOfCategories(r: RegExp[]): Promise<Record<string, number[]>>
+    }).getItemsOfCategories(OPENING_CATEGORY_REGEXPS)
+  } catch {
+    return { elementToOpenings, openingToFillers, openingDetails }
+  }
+
+  const openingLocalIds: number[] = []
+  for (const ids of Object.values(openingCatMap)) {
+    openingLocalIds.push(...ids)
+  }
+
+  if (openingLocalIds.length === 0) {
+    return { elementToOpenings, openingToFillers, openingDetails }
+  }
+
+  // Fetch opening items with HasFillings relation
+  let openingDataRaw: unknown = {}
+  try {
+    openingDataRaw = await (model as unknown as {
+      getItemsData(
+        ids:    number[],
+        config: { attributesDefault: boolean; relations: Record<string, { attributes: boolean; relations: boolean }> }
+      ): Promise<unknown>
+    }).getItemsData(openingLocalIds, {
+      attributesDefault: true,
+      relations: {
+        HasFillings:   { attributes: true, relations: false },
+        VoidsElements: { attributes: true, relations: false },
+      },
+    })
+  } catch {
+    return { elementToOpenings, openingToFillers, openingDetails }
+  }
+
+  const openingItems = iterateRawItems(openingDataRaw)
+  let fillingCount = 0
+  let voidCount    = 0
+
+  for (const item of openingItems) {
+    const openingGuid = unwrapString(item['_guid'])
+    if (!openingGuid) continue
+
+    const rawCat  = unwrapString(item['_category']) ?? 'IFCOPENINGELEMENT'
+    const ifcType = categoryKeyToIfcType(rawCat)
+    const name    = readAttr(item, 'Name') ?? 'Opening'
+    openingDetails.set(openingGuid, { name, ifcType })
+
+    // VoidsElements → the wall/slab this opening is cut into
+    const voidsElements = item['VoidsElements']
+    if (Array.isArray(voidsElements)) {
+      for (const elItem of voidsElements as RawItem[]) {
+        const elGuid = unwrapString(elItem['_guid'])
+        if (!elGuid) continue
+        if (!elementToOpenings.has(elGuid)) elementToOpenings.set(elGuid, [])
+        if (!elementToOpenings.get(elGuid)!.includes(openingGuid)) {
+          elementToOpenings.get(elGuid)!.push(openingGuid)
+          voidCount++
+        }
+      }
+    }
+
+    // HasFillings → the doors/windows filling this opening
+    const hasFillings = item['HasFillings']
+    if (Array.isArray(hasFillings)) {
+      if (!openingToFillers.has(openingGuid)) openingToFillers.set(openingGuid, [])
+      for (const fItem of hasFillings as RawItem[]) {
+        const fGuid = unwrapString(fItem['_guid'])
+        if (!fGuid) continue
+        if (!openingToFillers.get(openingGuid)!.includes(fGuid)) {
+          openingToFillers.get(openingGuid)!.push(fGuid)
+          fillingCount++
+        }
+      }
+    }
+  }
+
+  console.log(`[IFCLoader] Void/fill: ${openingItems.length} openings, ${voidCount} voids, ${fillingCount} fillings`)
+
+  return { elementToOpenings, openingToFillers, openingDetails }
+}
+
 // ─── IFCLoaderWrapper ─────────────────────────────────────────────────────────
 
 export class IFCLoaderWrapper {
-  /**
-   * Extracts normalized IFCObject[] from a loaded FragmentsModel.
-   *
-   * Pipeline:
-   *
-   *  1. model.getItemsOfCategories(ELEMENT_CATEGORY_REGEXPS)
-   *       → { [categoryKey]: localId[] }
-   *
-   *  2. Collect all localIds → category lookup.
-   *
-   *  3. model.getItemsData(localIds, config)
-   *
-   *       CONFIRMED item shape (@thatopen/components 3.4.6 / web-ifc 0.0.77):
-   *
-   *         {
-   *           _guid:       { value: "1F6umJ5H50aeL3A1As_wUF" },
-   *           _localId:    { value: 572 },
-   *           _category:   { value: "IFCDOOR" },
-   *           Name:        { value: "M_Single-Flush:Outside door:346843", type: "IFCLABEL" },
-   *           ObjectType:  { value: "M_Single-Flush:Outside door",        type: "IFCLABEL" },
-   *           Tag:         { value: "346843",                             type: "IFCIDENTIFIER" },
-   *           Description: { value: null, ... },
-   *           // ... further wrapped attrs
-   *         }
-   *
-   *       Every field — including _guid, _localId, _category — is a
-   *       { value: <primitive> } wrapper object.  None are bare primitives.
-   *       All are unwrapped via unwrapString() / unwrapNumber().
-   *
-   *  4. mapRawArrayToIFCObjects() normalises into the app's IFCObject type.
-   */
+
   async extractObjects(model: FRAGS.FragmentsModel): Promise<IFCObject[]> {
 
-    // ── Step 1: Get physical product localIds, grouped by category ────────
+    // Step 1: Get physical product localIds
     let categoryMap: Record<string, number[]> = {}
     try {
       categoryMap = await (model as unknown as {
@@ -240,8 +577,7 @@ export class IFCLoaderWrapper {
       return []
     }
 
-    // ── Step 2: Build flat localId[] and localId → category lookup ────────
-    const localIds:    number[] = []
+    const localIds:     number[] = []
     const localIdToCat = new Map<number, string>()
 
     for (const [cat, ids] of Object.entries(categoryMap)) {
@@ -261,16 +597,13 @@ export class IFCLoaderWrapper {
       `across ${Object.keys(categoryMap).length} categories`
     )
 
-    // ── Step 3: Fetch attributes + Psets for all products in one call ─────
+    // Step 2: Fetch attributes + Psets
     let itemDataRaw: unknown = {}
     try {
       itemDataRaw = await (model as unknown as {
         getItemsData(
           ids:    number[],
-          config: {
-            attributesDefault: boolean
-            relations: Record<string, { attributes: boolean; relations: boolean }>
-          }
+          config: { attributesDefault: boolean; relations: Record<string, { attributes: boolean; relations: boolean }> }
         ): Promise<unknown>
       }).getItemsData(localIds, {
         attributesDefault: true,
@@ -282,10 +615,7 @@ export class IFCLoaderWrapper {
       console.warn('[IFCLoaderWrapper] getItemsData with Psets failed, retrying attributes-only:', err)
       try {
         itemDataRaw = await (model as unknown as {
-          getItemsData(
-            ids:    number[],
-            config: { attributesDefault: boolean }
-          ): Promise<unknown>
+          getItemsData(ids: number[], config: { attributesDefault: boolean }): Promise<unknown>
         }).getItemsData(localIds, { attributesDefault: true })
       } catch (err2) {
         console.error('[IFCLoaderWrapper] getItemsData attributes-only also failed:', err2)
@@ -293,98 +623,32 @@ export class IFCLoaderWrapper {
       }
     }
 
-    // ── Step 3b: Detect top-level shape and build a unified item iterator ──
-    //
-    // Top-level is either:
-    //   Array  → items positionally aligned with localIds[]
-    //   Object → items keyed by localId string
-    //
-    // In both cases each item has the confirmed shape above.
+    const items = iterateRawItems(itemDataRaw)
 
-    console.log('[IFCLoaderWrapper] getItemsData typeof:', typeof itemDataRaw, '| isArray:', Array.isArray(itemDataRaw))
-
-    type RawItem = Record<string, unknown>
-
-    let iterItems: () => Iterable<RawItem>
-
-    if (Array.isArray(itemDataRaw)) {
-      const arr = itemDataRaw as unknown[]
-      console.log('[IFCLoaderWrapper] getItemsData returned array, length:', arr.length)
-      if (arr.length > 0) {
-        const s = arr[0]
-        if (s && typeof s === 'object' && !Array.isArray(s)) {
-          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0] keys:', Object.keys(s as object))
-          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._guid:', (s as RawItem)['_guid'])
-          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._localId:', (s as RawItem)['_localId'])
-          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._category:', (s as RawItem)['_category'])
-        }
-      }
-      iterItems = () => arr.filter(
-        (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
-      )
-    } else if (itemDataRaw !== null && typeof itemDataRaw === 'object') {
-      const map = itemDataRaw as Record<string, unknown>
-      const keys = Object.keys(map)
-      console.log('[IFCLoaderWrapper] getItemsData returned keyed map, key count:', keys.length)
-      if (keys.length > 0) {
-        const s = map[keys[0]]
-        if (s && typeof s === 'object' && !Array.isArray(s)) {
-          console.log('[IFCLoaderWrapper] INSTRUMENT map[0] keys:', Object.keys(s as object))
-          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._guid:', (s as RawItem)['_guid'])
-          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._localId:', (s as RawItem)['_localId'])
-          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._category:', (s as RawItem)['_category'])
-        }
-      }
-      iterItems = () => Object.values(map).filter(
-        (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
-      )
-    } else {
-      console.error('[IFCLoaderWrapper] getItemsData returned unexpected type:', typeof itemDataRaw)
+    if (items.length === 0) {
+      console.error('[IFCLoaderWrapper] getItemsData returned no items')
       return this.fallbackToGuidsOnly(model, localIds, localIdToCat)
     }
 
-    // ── Step 4: Normalise into RawIFCData ─────────────────────────────────
-    //
-    // Every field is a { value: <primitive> } wrapper — including _guid,
-    // _localId, and _category.  All are unwrapped via unwrapString() /
-    // unwrapNumber() before use.  No field is read as a bare primitive.
-
     const rawItems: Parameters<typeof mapRawArrayToIFCObjects>[0] = []
 
-    for (const item of iterItems()) {
-      // ── Instrument ─────────────────────────────────────────────────────
-      console.log('[IFCLoaderWrapper] INSTRUMENT item keys:', Object.keys(item))
-      console.log('  _guid:', item['_guid'], '| _localId:', item['_localId'], '| _category:', item['_category'])
-      console.log('  Name:', item['Name'], '| ObjectType:', item['ObjectType'], '| Tag:', item['Tag'])
-
-      // ── GlobalId — unwrap _guid.value ──────────────────────────────────
+    for (const item of items) {
       const globalId = unwrapString(item['_guid'])
-      if (!globalId) {
-        console.warn('  SKIP: _guid.value missing or empty')
-        continue
-      }
+      if (!globalId) continue
 
-      // ── ExpressId — unwrap _localId.value as a number ──────────────────
-      const expressId = unwrapNumber(item['_localId'])
-
-      // ── IFC type — unwrap _category.value, fall back to localIdToCat ───
+      const expressId      = unwrapNumber(item['_localId'])
       const rawCatFromItem = unwrapString(item['_category'])
       const rawCat = rawCatFromItem
         ?? (expressId !== undefined ? localIdToCat.get(expressId) : undefined)
         ?? 'IFCBUILDINGELEMENTPROXY'
       const ifcType = categoryKeyToIfcType(rawCat)
 
-      // ── Named attribute fields — all wrapped; readAttr() unwraps them ───
       const name           = readAttr(item, 'Name')         ?? 'Unnamed'
       const tag            = readAttr(item, 'Tag')
       const description    = readAttr(item, 'Description')
       const objectType     = readAttr(item, 'ObjectType')
       const predefinedType = readAttr(item, 'PredefinedType')
-
-      // ── Psets ───────────────────────────────────────────────────────────
-      const properties = extractPsets(item)
-
-      console.log(`  → ACCEPTED globalId=${globalId} expressId=${expressId} name="${name}" type=${ifcType}`)
+      const properties     = extractPsets(item)
 
       rawItems.push({
         globalId,
@@ -404,25 +668,39 @@ export class IFCLoaderWrapper {
   }
 
   /**
-   * Last-resort fallback: produce minimal IFCObjects using only
-   * getGuidsByLocalIds(). Names will be 'Unnamed' but count and type correct.
+   * Extracts the IFC spatial decomposition tree.
+   * Reads IFCRELAGGREGATES (IsDecomposedBy) and
+   * IFCRELCONTAINEDINSPATIALSTRUCTURE (ContainsElements).
    */
+  async extractSpatialTree(model: FRAGS.FragmentsModel): Promise<IFCSpatialTree> {
+    return extractSpatialTree(model)
+  }
+
+  /**
+   * Extracts void/fill relationships.
+   * Returns opening elements and their fillers (doors, windows).
+   */
+  async extractVoidFillRelations(
+    model: FRAGS.FragmentsModel,
+    elementGlobalIds: string[]
+  ) {
+    return extractVoidFillRelations(model, elementGlobalIds)
+  }
+
   private async fallbackToGuidsOnly(
     model:         FRAGS.FragmentsModel,
     localIds:      number[],
     localIdToCat:  Map<number, string>
   ): Promise<IFCObject[]> {
     try {
-      const guids = await model.getGuidsByLocalIds(localIds)
+      const guids    = await model.getGuidsByLocalIds(localIds)
       const rawItems: Parameters<typeof mapRawArrayToIFCObjects>[0] = []
 
       localIds.forEach((localId, i) => {
         const globalId = guids[i]
         if (typeof globalId !== 'string' || globalId.length === 0) return
-
         const rawCat  = localIdToCat.get(localId) ?? 'IFCBUILDINGELEMENTPROXY'
         const ifcType = categoryKeyToIfcType(rawCat)
-
         rawItems.push({ globalId, expressId: localId, name: 'Unnamed', type: ifcType })
       })
 

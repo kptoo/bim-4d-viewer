@@ -1,391 +1,619 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useViewerStore } from '../store/viewer.store'
+import {
+  useState, useEffect, useCallback, useMemo, useRef, memo,
+} from 'react'
+import { useViewerStore }    from '../store/viewer.store'
 import { useSelectionStore } from '../store/selection.store'
-import { ifcTypeIcon } from '../utils/ifc.utils'
-import type { IFCObject, IFCType } from '../types'
+import { ifcTypeIcon }       from '../utils/ifc.utils'
+import type { IFCObject, IFCSpatialTree, IFCType } from '../types'
 
-// ─── Hierarchy configuration ────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-/**
- * IFC spatial structure types, in hierarchy order.
- * Everything not listed here becomes a leaf "Element" node.
- */
-const SPATIAL_TYPES: IFCType[] = [
-  'IfcProject',
-  'IfcSite',
-  'IfcBuilding',
-  'IfcBuildingStorey',
-  'IfcSpace',
-]
-
-const SPATIAL_TYPE_SET = new Set<string>(SPATIAL_TYPES)
+const ROW_HEIGHT = 26
+const OVERSCAN   = 8
 
 const SPATIAL_ICONS: Record<string, string> = {
-  IfcProject:         '🏗',
-  IfcSite:            '🌍',
-  IfcBuilding:        '🏢',
-  IfcBuildingStorey:  '📐',
-  IfcSpace:           '📦',
+  IfcProject:          '🏗',
+  IfcSite:             '🌍',
+  IfcBuilding:         '🏢',
+  IfcBuildingStorey:   '📐',
+  IfcSpace:            '📦',
+  IfcOpeningElement:   '🔲',
+  IfcVirtualElement:   '🔲',
 }
 
-// ─── Tree node types ─────────────────────────────────────────────────────────
+const UNASSIGNED_KEY = '__unassigned__'
 
-interface TreeNode {
-  id:         string        // globalId or synthetic group id
-  label:      string        // Display name
-  ifcType:    string        // IFC entity type string
-  globalId:   string | null // null for synthetic group nodes
-  children:   TreeNode[]
-  isGroup:    boolean       // true = synthetic group (not a real IFC object)
+// ─── Display node ─────────────────────────────────────────────────────────────
+
+interface DisplayNode {
+  id:       string
+  label:    string
+  ifcType:  string
+  globalId: string | null   // null for synthetic group nodes
+  isGroup:  boolean
+  childIds: string[]
+  parentId: string | null
+  depth:    number
 }
 
-// ─── Tree builder ────────────────────────────────────────────────────────────
+// ─── Build display tree ───────────────────────────────────────────────────────
 
 /**
- * Builds a spatial hierarchy tree from the flat IFCObject[] array.
+ * Converts IFCSpatialTree + IFCObject[] into a flat DisplayNode map.
  *
- * Strategy (without RelationsIndexer, which requires async model access):
- *   1. Split objects into "spatial" (Project/Site/Building/Storey/Space) and "elements"
- *   2. Group spatial objects by type in hierarchy order
- *   3. Group element objects by IFC type under a synthetic "Elements" container
- *   4. Nest everything under the deepest spatial container available
- *
- * This gives a clean, browseable hierarchy from data already in the store.
+ * Prints the full debug summary requested:
+ *   - Relationship graph traversal
+ *   - Detected hierarchy
+ *   - Counts of each relationship type
  */
-function buildTree(objects: IFCObject[]): TreeNode[] {
-  if (objects.length === 0) return []
+function buildDisplayTree(
+  spatialTree: IFCSpatialTree,
+  objectMap:   Map<string, IFCObject>,
+  modelName:   string
+): { nodes: Map<string, DisplayNode>; rootIds: string[] } {
+  const nodes:   Map<string, DisplayNode> = new Map()
+  const rootIds: string[]                 = []
 
-  // Split spatial vs element objects
-  const spatialObjects  = objects.filter(o => SPATIAL_TYPE_SET.has(o.type))
-  const elementObjects  = objects.filter(o => !SPATIAL_TYPE_SET.has(o.type))
+  // ── Counters for debug output ────────────────────────────────────────────
+  let aggregateRelCount   = 0
+  let containmentCount    = 0
+  let openingRelCount     = 0
+  let fillingRelCount     = 0
+  let groupedCategories   = 0
+  let orphanNodeCount     = 0
 
-  // ── Build spatial branch ──────────────────────────────────────────────────
-  // Sort by hierarchy order so Project > Site > Building > Storey > Space
-  const spatialOrdered = [...spatialObjects].sort((a, b) => {
-    const ai = SPATIAL_TYPES.indexOf(a.type as IFCType)
-    const bi = SPATIAL_TYPES.indexOf(b.type as IFCType)
-    const ar = ai === -1 ? 999 : ai
-    const br = bi === -1 ? 999 : bi
-    return ar - br
-  })
-
-  // Build spatial nodes (flat list, will be nested below)
-  const spatialNodes: TreeNode[] = spatialOrdered.map(obj => ({
-    id:       obj.globalId,
-    label:    obj.name || obj.type,
-    ifcType:  obj.type,
-    globalId: obj.globalId,
-    children: [],
-    isGroup:  false,
-  }))
-
-  // ── Build element branch — group by IFC type ──────────────────────────────
-  const typeMap = new Map<string, IFCObject[]>()
-  for (const obj of elementObjects) {
-    const existing = typeMap.get(obj.type) ?? []
-    existing.push(obj)
-    typeMap.set(obj.type, existing)
+  function addNode(node: DisplayNode): void {
+    nodes.set(node.id, node)
   }
 
-  // Sort type groups alphabetically
-  const sortedTypes = Array.from(typeMap.keys()).sort()
+  // ── Build element type-group subtree ──────────────────────────────────────
+  function buildElementGroups(
+    elementGlobalIds: string[],
+    parentId:         string,
+    depth:            number,
+    spatialNodeId:    string   // storey/space that owns these elements
+  ): string[] {
+    const byType = new Map<string, string[]>()
 
-  const elementTypeNodes: TreeNode[] = sortedTypes.map(ifcType => {
-    const items = typeMap.get(ifcType)!
-    const children: TreeNode[] = items.map(obj => ({
-      id:       obj.globalId,
-      label:    obj.name || 'Unnamed Element',
-      ifcType:  obj.type,
-      globalId: obj.globalId,
-      children: [],
+    for (const gid of elementGlobalIds) {
+      const obj = objectMap.get(gid)
+      if (!obj) continue
+      const arr = byType.get(obj.type) ?? []
+      arr.push(gid)
+      byType.set(obj.type, arr)
+    }
+
+    const sortedTypes = Array.from(byType.keys()).sort()
+    groupedCategories += sortedTypes.length
+    const groupIds: string[] = []
+
+    for (const ifcType of sortedTypes) {
+      const elemGids = byType.get(ifcType)!
+      elemGids.sort((a, b) => (objectMap.get(a)?.name ?? '').localeCompare(objectMap.get(b)?.name ?? ''))
+
+      const groupId  = `grp:${spatialNodeId}:${ifcType}`
+      const leafIds: string[] = []
+
+      for (const gid of elemGids) {
+        const obj     = objectMap.get(gid)
+        const leafId  = `leaf:${spatialNodeId}:${gid}`
+
+        // ── Void/fill sub-children ─────────────────────────────────────────
+        const openingIds   = spatialTree.elementToOpenings.get(gid) ?? []
+        const openingNodes: string[] = []
+
+        for (const openingGid of openingIds) {
+          const details      = spatialTree.openingDetails.get(openingGid)
+          const openingNodeId = `opening:${leafId}:${openingGid}`
+          const fillerGids   = spatialTree.openingToFillers.get(openingGid) ?? []
+          const fillerNodeIds: string[] = []
+
+          for (const fillerGid of fillerGids) {
+            const fillerObj    = objectMap.get(fillerGid)
+            const fillerNodeId = `filler:${openingNodeId}:${fillerGid}`
+            addNode({
+              id:       fillerNodeId,
+              label:    fillerObj?.name ?? 'Unnamed',
+              ifcType:  fillerObj?.type ?? 'IfcDoor',
+              globalId: fillerGid,
+              isGroup:  false,
+              childIds: [],
+              parentId: openingNodeId,
+              depth:    depth + 4,
+            })
+            fillerNodeIds.push(fillerNodeId)
+            fillingRelCount++
+          }
+
+          addNode({
+            id:       openingNodeId,
+            label:    details?.name ?? 'Opening',
+            ifcType:  details?.ifcType ?? 'IfcOpeningElement',
+            globalId: openingGid,
+            isGroup:  false,
+            childIds: fillerNodeIds,
+            parentId: leafId,
+            depth:    depth + 3,
+          })
+          openingNodes.push(openingNodeId)
+          openingRelCount++
+        }
+
+        addNode({
+          id:       leafId,
+          label:    obj?.name ?? 'Unnamed',
+          ifcType:  obj?.type ?? ifcType,
+          globalId: gid,
+          isGroup:  false,
+          childIds: openingNodes,
+          parentId: groupId,
+          depth:    depth + 1,
+        })
+        leafIds.push(leafId)
+      }
+
+      const typeName = ifcType.replace(/^Ifc/, '')
+      addNode({
+        id:       groupId,
+        label:    `${typeName} (${elemGids.length})`,
+        ifcType,
+        globalId: null,
+        isGroup:  true,
+        childIds: leafIds,
+        parentId,
+        depth,
+      })
+      groupIds.push(groupId)
+    }
+
+    return groupIds
+  }
+
+  // ── Walk spatial tree from root ───────────────────────────────────────────
+  function walkSpatialNode(
+    globalId: string,
+    parentId: string | null,
+    depth:    number
+  ): void {
+    const spatialNode = spatialTree.spatialNodes.get(globalId)
+    if (!spatialNode) return
+
+    const childIds: string[] = []
+
+    // Child spatial nodes (from IFCRELAGGREGATES)
+    for (const childGlobalId of spatialNode.childGlobalIds) {
+      walkSpatialNode(childGlobalId, globalId, depth + 1)
+      childIds.push(childGlobalId)
+      aggregateRelCount++
+    }
+
+    // Physical elements in this spatial container (from IFCRELCONTAINEDINSPATIALSTRUCTURE)
+    const elementGids = spatialTree.elementsByStorey.get(globalId) ?? []
+    if (elementGids.length > 0) {
+      const groupIds = buildElementGroups(elementGids, globalId, depth + 1, globalId)
+      childIds.push(...groupIds)
+      containmentCount += elementGids.length
+    }
+
+    addNode({
+      id:       globalId,
+      label:    spatialNode.name || spatialNode.ifcType,
+      ifcType:  spatialNode.ifcType,
+      globalId,
       isGroup:  false,
-    }))
-
-    return {
-      id:       `group:${ifcType}`,
-      label:    `${ifcType.replace(/^Ifc/, '')} (${items.length})`,
-      ifcType,
-      globalId: null,
-      children,
-      isGroup:  true,
-    }
-  })
-
-  // ── Assemble root ─────────────────────────────────────────────────────────
-  // If we have spatial structure: nest elements under the last (deepest) spatial node
-  // If no spatial structure: show a flat "Model" root
-  if (spatialNodes.length === 0) {
-    // No spatial hierarchy — flat model root
-    const modelRoot: TreeNode = {
-      id:       'group:model',
-      label:    'Model',
-      ifcType:  'IfcProject',
-      globalId: null,
-      children: elementTypeNodes,
-      isGroup:  true,
-    }
-    return [modelRoot]
+      childIds,
+      parentId,
+      depth,
+    })
   }
 
-  // Nest each spatial level inside the previous one (chain)
-  // Last spatial node gets the element type nodes as children
-  const chainedSpatial = [...spatialNodes]
-  if (elementTypeNodes.length > 0) {
-    const elementsGroupNode: TreeNode = {
-      id:       'group:elements',
-      label:    `Elements (${elementObjects.length})`,
+  // ── Add model filename root wrapper ───────────────────────────────────────
+  const modelRootId = 'root:model'
+
+  for (const rootId of spatialTree.rootIds) {
+    walkSpatialNode(rootId, modelRootId, 1)
+    aggregateRelCount--  // compensate for the extra count from the top level
+  }
+
+  addNode({
+    id:       modelRootId,
+    label:    modelName || 'Model',
+    ifcType:  'IfcProject',
+    globalId: null,
+    isGroup:  false,
+    childIds: [...spatialTree.rootIds],
+    parentId: null,
+    depth:    0,
+  })
+  rootIds.push(modelRootId)
+
+  // ── Unassigned elements (no storey membership) ────────────────────────────
+  const unassigned = spatialTree.elementsByStorey.get(UNASSIGNED_KEY) ?? []
+  if (unassigned.length > 0) {
+    const unassignedId = 'grp:unassigned'
+    const groupIds = buildElementGroups(unassigned, unassignedId, 1, UNASSIGNED_KEY)
+    addNode({
+      id:       unassignedId,
+      label:    `Unassigned (${unassigned.length})`,
       ifcType:  'IfcBuildingElement',
       globalId: null,
-      children: elementTypeNodes,
       isGroup:  true,
+      childIds: groupIds,
+      parentId: null,
+      depth:    0,
+    })
+    rootIds.push(unassignedId)
+  }
+
+  // ── Count orphans: spatial nodes not reached from any root ────────────────
+  const visitedIds = new Set<string>()
+  function markVisited(id: string): void {
+    if (visitedIds.has(id)) return
+    visitedIds.add(id)
+    const node = nodes.get(id)
+    if (node) node.childIds.forEach(markVisited)
+  }
+  rootIds.forEach(markVisited)
+  for (const id of spatialTree.spatialNodes.keys()) {
+    if (!visitedIds.has(id)) orphanNodeCount++
+  }
+
+  // ── Debug: relationship graph ─────────────────────────────────────────────
+  console.log('\n[IFCObjectTree] ── Building relationship graph ────────────────────')
+  for (const node of spatialTree.spatialNodes.values()) {
+    if (node.childGlobalIds.length > 0) {
+      console.log(`  ${node.ifcType} "${node.name}"`)
+      for (const childId of node.childGlobalIds) {
+        const child = spatialTree.spatialNodes.get(childId)
+        console.log(`      -> ${child?.ifcType ?? '?'} "${child?.name ?? childId}"`)
+      }
     }
-    chainedSpatial[chainedSpatial.length - 1].children.push(elementsGroupNode)
+    const contained = spatialTree.elementsByStorey.get(node.globalId) ?? []
+    if (contained.length > 0) {
+      console.log(`  ${node.ifcType} "${node.name}" contains:`)
+      // Group by type for display
+      const byType = new Map<string, number>()
+      for (const gid of contained) {
+        const t = objectMap.get(gid)?.type ?? '?'
+        byType.set(t, (byType.get(t) ?? 0) + 1)
+      }
+      for (const [t, count] of byType) {
+        console.log(`      ${t} ×${count}`)
+      }
+    }
   }
 
-  // Nest from deepest → shallowest so that each node contains the next
-  for (let i = chainedSpatial.length - 2; i >= 0; i--) {
-    chainedSpatial[i].children.unshift(chainedSpatial[i + 1])
+  for (const [elGid, openings] of spatialTree.elementToOpenings) {
+    const elName = objectMap.get(elGid)?.name ?? elGid
+    console.log(`  ${elName} voids:`)
+    for (const oGid of openings) {
+      const oName    = spatialTree.openingDetails.get(oGid)?.name ?? 'Opening'
+      const fillers  = spatialTree.openingToFillers.get(oGid) ?? []
+      console.log(`      Opening "${oName}"`)
+      for (const fGid of fillers) {
+        const fName = objectMap.get(fGid)?.name ?? fGid
+        console.log(`          filled by "${fName}"`)
+      }
+    }
   }
 
-  return [chainedSpatial[0]]
+  // ── Debug: hierarchy summary ──────────────────────────────────────────────
+  console.log('\n[IFCObjectTree] ── Detected hierarchy ─────────────────────────────')
+  function printHierarchy(id: string, indent: string): void {
+    const node = nodes.get(id)
+    if (!node) return
+    console.log(`${indent}${node.label} (${node.ifcType})`)
+    for (const childId of node.childIds.slice(0, 6)) {  // cap at 6 to avoid flooding
+      printHierarchy(childId, indent + '  ')
+    }
+    if (node.childIds.length > 6) {
+      console.log(`${indent}  ... (${node.childIds.length - 6} more)`)
+    }
+  }
+  for (const rid of rootIds) printHierarchy(rid, '  ')
+
+  // ── Debug: statistics ─────────────────────────────────────────────────────
+  console.log('\n[IFCObjectTree] ── Statistics ──────────────────────────────────────')
+  console.log(`  IfcRelAggregates resolved:      ${aggregateRelCount}`)
+  console.log(`  ContainedInStructure resolved:  ${containmentCount}`)
+  console.log(`  IfcRelVoidsElement resolved:    ${openingRelCount}`)
+  console.log(`  IfcRelFillsElement resolved:    ${fillingRelCount}`)
+  console.log(`  Grouped IFC categories:         ${groupedCategories}`)
+  console.log(`  Root nodes:                     ${rootIds.length}`)
+  console.log(`  Orphan spatial nodes:           ${orphanNodeCount}`)
+  console.log(`  Total display nodes:            ${nodes.size}`)
+  console.log('')
+
+  return { nodes, rootIds }
 }
 
-/**
- * Returns the set of node IDs that are ancestors of the given globalId,
- * so we can auto-expand the path to the selected node.
- */
-function findAncestorIds(nodes: TreeNode[], targetGlobalId: string): Set<string> {
+// ─── Fallback: type-grouped tree when no spatial data ────────────────────────
+
+function buildFlatFallbackTree(
+  objects: IFCObject[]
+): { nodes: Map<string, DisplayNode>; rootIds: string[] } {
+  const nodes:   Map<string, DisplayNode> = new Map()
+  const rootIds: string[]                 = []
+
+  const byType = new Map<string, IFCObject[]>()
+  for (const obj of objects) {
+    const arr = byType.get(obj.type) ?? []
+    arr.push(obj)
+    byType.set(obj.type, arr)
+  }
+
+  const sortedTypes = Array.from(byType.keys()).sort()
+  const typeGroupIds: string[] = []
+
+  for (const ifcType of sortedTypes) {
+    const items   = byType.get(ifcType)!
+    const groupId = `grp:type:${ifcType}`
+    const leafIds: string[] = []
+
+    items.sort((a, b) => a.name.localeCompare(b.name))
+    for (const obj of items) {
+      nodes.set(obj.globalId, {
+        id: obj.globalId, label: obj.name || 'Unnamed', ifcType: obj.type,
+        globalId: obj.globalId, isGroup: false, childIds: [], parentId: groupId, depth: 2,
+      })
+      leafIds.push(obj.globalId)
+    }
+
+    nodes.set(groupId, {
+      id: groupId, label: `${ifcType.replace(/^Ifc/, '')} (${items.length})`, ifcType,
+      globalId: null, isGroup: true, childIds: leafIds, parentId: 'grp:model', depth: 1,
+    })
+    typeGroupIds.push(groupId)
+  }
+
+  nodes.set('grp:model', {
+    id: 'grp:model', label: 'Model', ifcType: 'IfcProject',
+    globalId: null, isGroup: true, childIds: typeGroupIds, parentId: null, depth: 0,
+  })
+  rootIds.push('grp:model')
+
+  return { nodes, rootIds }
+}
+
+// ─── Visible row generation ───────────────────────────────────────────────────
+
+function buildVisibleRows(
+  rootIds:     string[],
+  nodes:       Map<string, DisplayNode>,
+  expandedIds: Set<string>,
+  query:       string
+): string[] {
+  const rows:   string[] = []
+  const lowerQ = query.toLowerCase().trim()
+
+  if (lowerQ) {
+    const toShow = new Set<string>()
+    for (const [id, node] of nodes) {
+      const matches =
+        node.label.toLowerCase().includes(lowerQ) ||
+        node.ifcType.toLowerCase().includes(lowerQ) ||
+        (node.globalId?.toLowerCase().includes(lowerQ) ?? false)
+
+      if (matches) {
+        let cur: DisplayNode | undefined = node
+        while (cur) { toShow.add(cur.id); cur = cur.parentId ? nodes.get(cur.parentId) : undefined }
+        for (const cid of node.childIds) toShow.add(cid)
+      }
+    }
+    function dfsSearch(id: string): void {
+      if (!toShow.has(id)) return
+      rows.push(id)
+      const node = nodes.get(id)
+      if (!node) return
+      for (const childId of node.childIds) dfsSearch(childId)
+    }
+    for (const rid of rootIds) dfsSearch(rid)
+    return rows
+  }
+
+  function dfs(id: string): void {
+    rows.push(id)
+    const node = nodes.get(id)
+    if (!node || !expandedIds.has(id)) return
+    for (const childId of node.childIds) dfs(childId)
+  }
+  for (const rid of rootIds) dfs(rid)
+  return rows
+}
+
+function getAncestorIds(nodes: Map<string, DisplayNode>, nodeId: string): Set<string> {
   const result = new Set<string>()
-
-  function search(node: TreeNode, path: string[]): boolean {
-    if (node.globalId === targetGlobalId) {
-      path.forEach(id => result.add(id))
-      return true
-    }
-    for (const child of node.children) {
-      if (search(child, [...path, node.id])) return true
-    }
-    return false
-  }
-
-  for (const root of nodes) {
-    search(root, [])
-  }
+  let cur = nodes.get(nodeId)
+  while (cur?.parentId) { result.add(cur.parentId); cur = nodes.get(cur.parentId) }
   return result
 }
 
-// ─── Tree node component ─────────────────────────────────────────────────────
+// ─── Single row ───────────────────────────────────────────────────────────────
 
-interface TreeNodeProps {
-  node:             TreeNode
-  depth:            number
-  expandedIds:      Set<string>
-  selectedGlobalId: string | null
-  onToggle:         (id: string) => void
-  onSelect:         (globalId: string) => void
-}
-
-function TreeNodeRow({
-  node,
-  depth,
-  expandedIds,
-  selectedGlobalId,
-  onToggle,
-  onSelect,
-}: TreeNodeProps) {
-  const isExpanded = expandedIds.has(node.id)
-  const isSelected = node.globalId !== null && node.globalId === selectedGlobalId
-  const hasChildren = node.children.length > 0
-
-  const icon = SPATIAL_ICONS[node.ifcType] ?? ifcTypeIcon(node.ifcType as IFCType)
+const TreeRow = memo(function TreeRow({
+  node, isExpanded, isSelected, onToggle, onSelect,
+}: {
+  node: DisplayNode; isExpanded: boolean; isSelected: boolean
+  onToggle: (id: string) => void; onSelect: (globalId: string) => void
+}) {
+  const hasChildren = node.childIds.length > 0
+  const icon        = SPATIAL_ICONS[node.ifcType] ?? ifcTypeIcon(node.ifcType as IFCType)
 
   const handleClick = useCallback(() => {
-    if (hasChildren) onToggle(node.id)
+    if (hasChildren)   onToggle(node.id)
     if (node.globalId) onSelect(node.globalId)
   }, [node.id, node.globalId, hasChildren, onToggle, onSelect])
 
-  const handleChevronClick = useCallback((e: React.MouseEvent) => {
+  const handleChevron = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
     if (hasChildren) onToggle(node.id)
   }, [node.id, hasChildren, onToggle])
 
   return (
-    <>
-      <div
-        className={`tree-node${isSelected ? ' tree-node--selected' : ''}${node.isGroup ? ' tree-node--group' : ''}`}
-        style={{ paddingLeft: 8 + depth * 16 }}
-        onClick={handleClick}
-        title={node.globalId ? `GlobalId: ${node.globalId}` : undefined}
-      >
-        {/* Chevron */}
-        <span
-          className={`tree-chevron${hasChildren ? ' tree-chevron--visible' : ''}${isExpanded ? ' tree-chevron--open' : ''}`}
-          onClick={handleChevronClick}
-        >
-          ▶
-        </span>
+    <div
+      className={['tree-node', isSelected ? 'tree-node--selected' : '', node.isGroup ? 'tree-node--group' : ''].filter(Boolean).join(' ')}
+      style={{ paddingLeft: 8 + node.depth * 14 }}
+      onClick={handleClick}
+      title={node.globalId ? `GlobalId: ${node.globalId}` : node.label}
+    >
+      <span
+        className={['tree-chevron', hasChildren ? 'tree-chevron--visible' : '', isExpanded ? 'tree-chevron--open' : ''].filter(Boolean).join(' ')}
+        onClick={handleChevron}
+        aria-hidden
+      >▶</span>
+      <span className="tree-icon">{icon}</span>
+      <span className="tree-label">{node.label}</span>
+      {!node.isGroup && node.childIds.length === 0 && !SPATIAL_ICONS[node.ifcType] && (
+        <span className="tree-type-badge">{node.ifcType.replace(/^Ifc/, '')}</span>
+      )}
+    </div>
+  )
+})
 
-        {/* Icon */}
-        <span className="tree-icon">{icon}</span>
+// ─── Virtual list ─────────────────────────────────────────────────────────────
 
-        {/* Label */}
-        <span className="tree-label">{node.label}</span>
+function VirtualList({
+  rowIds, nodes, expandedIds, selectedGlobalId, onToggle, onSelect,
+}: {
+  rowIds: string[]; nodes: Map<string, DisplayNode>; expandedIds: Set<string>
+  selectedGlobalId: string | null; onToggle: (id: string) => void; onSelect: (globalId: string) => void
+}) {
+  const scrollRef             = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [height,    setHeight]    = useState(400)
 
-        {/* IFC type badge for leaf elements */}
-        {!node.isGroup && (
-          <span className="tree-type-badge">{node.ifcType.replace(/^Ifc/, '')}</span>
-        )}
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(e => setHeight(e[0].contentRect.height))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const handleScroll = useCallback(() => { setScrollTop(scrollRef.current?.scrollTop ?? 0) }, [])
+
+  const totalHeight  = rowIds.length * ROW_HEIGHT
+  const startIndex   = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
+  const endIndex     = Math.min(rowIds.length, startIndex + Math.ceil(height / ROW_HEIGHT) + OVERSCAN * 2)
+  const visibleIds   = rowIds.slice(startIndex, endIndex)
+
+  return (
+    <div ref={scrollRef} className="tree-scroll" onScroll={handleScroll}>
+      <div style={{ height: totalHeight, position: 'relative' }}>
+        <div style={{ position: 'absolute', top: startIndex * ROW_HEIGHT, width: '100%' }}>
+          {visibleIds.map(id => {
+            const node = nodes.get(id)
+            if (!node) return null
+            return (
+              <TreeRow
+                key={id}
+                node={node}
+                isExpanded={expandedIds.has(id)}
+                isSelected={node.globalId !== null && node.globalId === selectedGlobalId}
+                onToggle={onToggle}
+                onSelect={onSelect}
+              />
+            )
+          })}
+        </div>
       </div>
-
-      {/* Children */}
-      {isExpanded && hasChildren && node.children.map(child => (
-        <TreeNodeRow
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          expandedIds={expandedIds}
-          selectedGlobalId={selectedGlobalId}
-          onToggle={onToggle}
-          onSelect={onSelect}
-        />
-      ))}
-    </>
+    </div>
   )
 }
 
-// ─── Main tree panel ─────────────────────────────────────────────────────────
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function IFCObjectTree() {
-  const ifcObjects        = useViewerStore(s => s.ifcObjects)
-  const modelLoadState    = useViewerStore(s => s.modelLoadState)
-  const primaryGlobalId   = useSelectionStore(s => s.primaryGlobalId)
-  const selectObject      = useSelectionStore(s => s.selectObject)
+  const ifcObjects      = useViewerStore(s => s.ifcObjects)
+  const spatialTree     = useViewerStore(s => s.spatialTree)
+  const modelLoadState  = useViewerStore(s => s.modelLoadState)
+  const modelFileName   = useViewerStore(s => s.modelFileName)
+  const primaryGlobalId = useSelectionStore(s => s.primaryGlobalId)
+  const selectObject    = useSelectionStore(s => s.selectObject)
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Build tree from flat objects
-  const tree = useMemo(() => buildTree(ifcObjects), [ifcObjects])
+  const objectMap = useMemo<Map<string, IFCObject>>(() => {
+    const m = new Map<string, IFCObject>()
+    for (const obj of ifcObjects) m.set(obj.globalId, obj)
+    return m
+  }, [ifcObjects])
 
-  // Reset tree when a new model loads
+  const modelName = modelFileName?.replace(/\.[^.]+$/, '') ?? 'Model'
+
+  const { nodes, rootIds } = useMemo(() => {
+    if (spatialTree && spatialTree.spatialNodes.size > 0 && ifcObjects.length > 0) {
+      return buildDisplayTree(spatialTree, objectMap, modelName)
+    }
+    if (ifcObjects.length > 0) {
+      console.warn('[IFCObjectTree] No spatial tree — falling back to type grouping')
+      return buildFlatFallbackTree(ifcObjects)
+    }
+    return { nodes: new Map<string, DisplayNode>(), rootIds: [] as string[] }
+  }, [spatialTree, ifcObjects, objectMap, modelName])
+
   useEffect(() => {
-    if (modelLoadState === 'loaded' && tree.length > 0) {
-      // Auto-expand root node
-      setExpandedIds(new Set([tree[0].id]))
+    if (modelLoadState === 'idle') { setExpandedIds(new Set()); setSearchQuery(''); return }
+    if (modelLoadState === 'loaded' && rootIds.length > 0) {
+      // Auto-expand root + first two levels
+      const initial = new Set<string>()
+      function expand(id: string, depth: number): void {
+        if (depth > 2) return
+        initial.add(id)
+        nodes.get(id)?.childIds.forEach(cid => expand(cid, depth + 1))
+      }
+      expand(rootIds[0], 0)
+      setExpandedIds(initial)
     }
-    if (modelLoadState === 'idle') {
-      setExpandedIds(new Set())
-      setSearchQuery('')
-    }
-  }, [modelLoadState, tree])
+  }, [modelLoadState, rootIds, nodes])
 
-  // Auto-expand path to selected node when 3D viewer picks an object
   const prevSelectedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!primaryGlobalId || primaryGlobalId === prevSelectedRef.current) return
     prevSelectedRef.current = primaryGlobalId
 
-    const ancestorIds = findAncestorIds(tree, primaryGlobalId)
-    if (ancestorIds.size > 0) {
-      setExpandedIds(prev => {
-        const next = new Set(prev)
-        ancestorIds.forEach(id => next.add(id))
-        return next
-      })
+    // The leaf node for a selected element may have id = "leaf:storeyId:globalId"
+    // Find it by looking for a node whose globalId matches
+    let targetId: string | undefined
+    for (const [id, node] of nodes) {
+      if (node.globalId === primaryGlobalId) { targetId = id; break }
     }
-  }, [primaryGlobalId, tree])
+    if (!targetId) return
 
-  const handleToggle = useCallback((id: string) => {
+    const ancestors = getAncestorIds(nodes, targetId)
+    if (ancestors.size === 0) return
+
     setExpandedIds(prev => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else               next.add(id)
+      ancestors.forEach(id => next.add(id))
       return next
     })
+  }, [primaryGlobalId, nodes])
+
+  const visibleRowIds = useMemo(
+    () => buildVisibleRows(rootIds, nodes, expandedIds, searchQuery),
+    [rootIds, nodes, expandedIds, searchQuery]
+  )
+
+  const handleToggle      = useCallback((id: string) => {
+    setExpandedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
   }, [])
-
-  const handleSelect = useCallback((globalId: string) => {
-    selectObject(globalId, false)
-  }, [selectObject])
-
-  const handleExpandAll = useCallback(() => {
-    const allIds = new Set<string>()
-    function collect(node: TreeNode) {
-      allIds.add(node.id)
-      node.children.forEach(collect)
-    }
-    tree.forEach(collect)
-    setExpandedIds(allIds)
-  }, [tree])
-
-  const handleCollapseAll = useCallback(() => {
-    setExpandedIds(new Set())
-  }, [])
-
-  // Search filtering — builds a filtered tree keeping any node
-  // whose label or type matches, plus all its ancestors
-  const filteredTree = useMemo(() => {
-    if (!searchQuery.trim()) return tree
-
-    const q = searchQuery.toLowerCase()
-
-    function nodeMatches(node: TreeNode): boolean {
-      return (
-        node.label.toLowerCase().includes(q) ||
-        node.ifcType.toLowerCase().includes(q) ||
-        (node.globalId?.toLowerCase().includes(q) ?? false)
-      )
-    }
-
-    function filterNode(node: TreeNode): TreeNode | null {
-      const filteredChildren = node.children
-        .map(filterNode)
-        .filter((n): n is TreeNode => n !== null)
-
-      if (nodeMatches(node) || filteredChildren.length > 0) {
-        return { ...node, children: filteredChildren }
-      }
-      return null
-    }
-
-    return tree.map(filterNode).filter((n): n is TreeNode => n !== null)
-  }, [tree, searchQuery])
-
-  // Auto-expand all when searching
-  useEffect(() => {
-    if (!searchQuery.trim()) return
-    const allIds = new Set<string>()
-    function collect(node: TreeNode) {
-      allIds.add(node.id)
-      node.children.forEach(collect)
-    }
-    filteredTree.forEach(collect)
-    setExpandedIds(allIds)
-  }, [filteredTree, searchQuery])
-
-  // ── Empty states ──────────────────────────────────────────────────────────
+  const handleSelect      = useCallback((globalId: string) => selectObject(globalId, false), [selectObject])
+  const handleExpandAll   = useCallback(() => setExpandedIds(new Set(nodes.keys())), [nodes])
+  const handleCollapseAll = useCallback(() => setExpandedIds(new Set()), [])
 
   if (modelLoadState !== 'loaded') {
-    return (
-      <div className="tree-empty">
-        <div className="tree-empty__icon">🌲</div>
-        <p>Load an IFC model to view the object tree</p>
-      </div>
-    )
+    return <div className="tree-empty"><div className="tree-empty__icon">🌲</div><p>Load an IFC model to view the object tree</p></div>
+  }
+  if (ifcObjects.length === 0) {
+    return <div className="tree-empty"><div className="tree-empty__icon">📭</div><p>No objects found in model</p></div>
   }
 
-  if (ifcObjects.length === 0) {
-    return (
-      <div className="tree-empty">
-        <div className="tree-empty__icon">📭</div>
-        <p>No objects found in model</p>
-      </div>
-    )
-  }
+  const hasSpatial = spatialTree && spatialTree.spatialNodes.size > 0
 
   return (
     <div className="tree-panel">
-      {/* Search + toolbar */}
       <div className="tree-toolbar">
         <input
           className="tree-search"
@@ -398,26 +626,29 @@ export default function IFCObjectTree() {
         <button className="tree-action-btn" onClick={handleCollapseAll} title="Collapse all">⊟</button>
       </div>
 
-      {/* Tree */}
-      <div className="tree-scroll">
-        {filteredTree.length === 0 ? (
-          <div className="tree-empty tree-empty--inline">
-            <p>No results for "{searchQuery}"</p>
-          </div>
-        ) : (
-          filteredTree.map(node => (
-            <TreeNodeRow
-              key={node.id}
-              node={node}
-              depth={0}
-              expandedIds={expandedIds}
-              selectedGlobalId={primaryGlobalId}
-              onToggle={handleToggle}
-              onSelect={handleSelect}
-            />
-          ))
-        )}
+      <div className="tree-stats-bar">
+        <span className="tree-stats-count">{ifcObjects.length.toLocaleString()} elements</span>
+        {searchQuery.trim() && <span className="tree-stats-matches">{visibleRowIds.length} visible</span>}
+        <span
+          className={`tree-stats-mode${hasSpatial ? '' : ' tree-stats-mode--fallback'}`}
+          title={hasSpatial ? 'Hierarchy from IFC relationships' : 'Type-grouped (no spatial data)'}
+        >
+          {hasSpatial ? '📐 Spatial' : '📋 Grouped'}
+        </span>
       </div>
+
+      {visibleRowIds.length === 0 ? (
+        <div className="tree-empty tree-empty--inline"><p>No results for "{searchQuery}"</p></div>
+      ) : (
+        <VirtualList
+          rowIds={visibleRowIds}
+          nodes={nodes}
+          expandedIds={expandedIds}
+          selectedGlobalId={primaryGlobalId}
+          onToggle={handleToggle}
+          onSelect={handleSelect}
+        />
+      )}
     </div>
   )
 }

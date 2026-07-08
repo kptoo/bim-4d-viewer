@@ -1,15 +1,11 @@
-/**
- * Barrel export for all domain types.
- * Import from here throughout the application:
- *   import type { IFCObject, Activity } from '../types'
- */
-
 export type {
   IFCObject,
   IFCProperty,
   IFCClassification,
   IFCType,
   IFCClassificationSystem,
+  IFCSpatialNode,
+  IFCSpatialTree,
 } from './ifc.types'
 
 export type {

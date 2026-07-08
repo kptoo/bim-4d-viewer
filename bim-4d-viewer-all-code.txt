@@ -6505,6 +6505,13 @@ const makeObject = (
 ): IFCObject => ({
   name:          'Test Object',
   type:          'IfcWall',
+  // Required nullable fields must be given explicit null defaults here.
+  // Without them, spreading Partial<IFCObject> can leave these fields absent,
+  // which TypeScript infers as `undefined` — incompatible with `string | null`.
+  tag:           null,
+  description:   null,
+  objectType:    null,
+  predefinedType: null,
   properties:    [],
   layerIds:      [],
   activityIds:   [],
@@ -9045,18 +9052,12 @@ import { mapRawArrayToIFCObjects } from '../core/ifc/IFCObjectMapper'
 // 147 physical product types (walls, doors, slabs, MEP, structure, etc.) as
 // defined in the IFC schema.  ifcCategoryMap maps those codes to their
 // uppercase string names (e.g. 159607094 → "IFCWALL").
-//
-// We build one RegExp per category name and cache it. The array is passed
-// directly to model.getItemsOfCategories() on each extraction call.
 
 const ELEMENT_CATEGORY_REGEXPS: RegExp[] = (() => {
   const regexps: RegExp[] = []
   for (const typeCode of ifcClasses.elements) {
     const name = ifcCategoryMap[typeCode as unknown as number]
     if (name) {
-      // Exact full-string match (anchored) so "IFCWALL" doesn't also match
-      // "IFCWALLSTANDARDCASE" when the engine does a contains-check internally.
-      // The library uses RegExp.test(categoryString) so anchors work correctly.
       regexps.push(new RegExp(`^${name}$`, 'i'))
     }
   }
@@ -9064,12 +9065,6 @@ const ELEMENT_CATEGORY_REGEXPS: RegExp[] = (() => {
 })()
 
 // ─── Reverse-map: numeric type code (as string) → uppercase IFC name ─────────
-//
-// getItemsOfCategories() may return keys that are either:
-//   (a) Human-readable uppercase names: "IFCWALL"
-//   (b) Numeric type codes as strings:  "659739252"
-//
-// This map handles case (b) so we always resolve a clean IFC name.
 
 const NUMERIC_CODE_TO_NAME: Map<string, string> = (() => {
   const m = new Map<string, string>()
@@ -9082,50 +9077,54 @@ const NUMERIC_CODE_TO_NAME: Map<string, string> = (() => {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Converts a raw category key returned by getItemsOfCategories() to a
- * PascalCase IFC type string suitable for display and storage.
- *
- * Handles both:
+ * Converts a raw category key to a PascalCase IFC type string.
  *   "IFCWALLSTANDARDCASE" → "IfcWallStandardCase"
  *   "659739252"           → resolves via ifcCategoryMap then converts
  */
 function categoryKeyToIfcType(rawKey: string): string {
-  // Resolve numeric code if necessary
   let upperName = rawKey.toUpperCase()
   if (/^\d+$/.test(rawKey)) {
     upperName = NUMERIC_CODE_TO_NAME.get(rawKey) ?? 'IFCBUILDINGELEMENTPROXY'
   }
-
-  // Convert IFCWALLSTANDARDCASE → IfcWallStandardCase
   if (!upperName.startsWith('IFC')) {
     return upperName
   }
-
-  // PascalCase: first letter uppercase, rest lowercase, no word boundaries
-  // "IFCWALLSTANDARDCASE" → first char 'I', rest "fcwallstandardcase"
   return upperName.charAt(0).toUpperCase() + upperName.slice(1).toLowerCase()
 }
 
 /**
- * Reads a scalar IFC attribute value from an ItemData entry.
+ * Universal IFC value unwrapper — handles every shape returned by this build.
  *
- * ItemAttribute shape: { value: any; type?: string }
- *   - Scalar string/number attributes have value directly as a primitive.
- *   - Some attributes wrap the primitive one level deeper: { value: { value: x } }
- *     (observed for IfcLabel / IfcIdentifier types in some model versions).
+ * ALL fields in the item object — including _guid, _localId, _category, Name,
+ * ObjectType, Tag, Description — are wrapped as { value: <primitive> }.
+ * None are bare primitives.
+ *
+ * Shapes handled:
+ *   { value: "string" }                     → "string"
+ *   { value: { value: "string", type: x } } → "string"  (nested wrap)
+ *   "string"                                → "string"  (rare bare primitive)
+ *   42                                      → "42"       (rare bare number)
+ *   anything else / null                    → null
  *
  * Returns a trimmed non-empty string, or null.
  */
-function readAttr(
-  data: Record<string, unknown>,
-  key: string
-): string | null {
-  const entry = data[key] as { value: unknown } | undefined
-  if (!entry) return null
+function unwrapString(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null
 
-  let v = entry.value
+  // Bare primitive fallback (safe to handle even if not the normal case)
+  if (typeof raw === 'string') {
+    const s = raw.trim()
+    return s.length > 0 ? s : null
+  }
+  if (typeof raw === 'number') return String(raw)
+  if (typeof raw === 'boolean') return String(raw)
 
-  // Unwrap one level of nesting if needed
+  if (typeof raw !== 'object') return null
+
+  // Standard wrapper: { value: x, type?: ... }
+  let v = (raw as Record<string, unknown>)['value']
+
+  // One level of nesting: { value: { value: x, type: ... }, type: ... }
   if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
     v = (v as { value: unknown }).value
   }
@@ -9139,16 +9138,52 @@ function readAttr(
 }
 
 /**
- * Extracts IFCProperty entries from the IsDefinedBy relation tree returned
- * by getItemsData() when called with the Pset config.
+ * Same as unwrapString but returns a number for numeric IFC values.
+ * Used for _localId which must be kept as a number for expressId.
+ *
+ * Returns a number, or undefined.
+ */
+function unwrapNumber(raw: unknown): number | undefined {
+  if (raw === null || raw === undefined) return undefined
+  if (typeof raw === 'number') return raw
+
+  if (typeof raw !== 'object') return undefined
+
+  let v = (raw as Record<string, unknown>)['value']
+
+  if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
+    v = (v as { value: unknown }).value
+  }
+
+  if (typeof v === 'number') return v
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return isNaN(n) ? undefined : n
+  }
+  return undefined
+}
+
+/**
+ * Reads and unwraps a named field from an item record.
+ * Thin wrapper around unwrapString for named-key access.
+ */
+function readAttr(
+  data: Record<string, unknown>,
+  key: string
+): string | null {
+  return unwrapString(data[key])
+}
+
+/**
+ * Extracts IFCProperty entries from the IsDefinedBy relation tree.
  *
  * IFC traversal path:
- *   item['IsDefinedBy']              → ItemData[]  (IfcRelDefinesByProperties instances)
- *     rel['RelatingPropertyDefinition'] → ItemData  (IfcPropertySet)
- *       pset['Name']                 → ItemAttribute (Pset name string)
- *       pset['HasProperties']        → ItemData[]  (IfcPropertySingleValue instances)
- *         prop['Name']               → ItemAttribute (property name)
- *         prop['NominalValue']       → ItemAttribute (property value)
+ *   item['IsDefinedBy']                  → ItemData[]
+ *     rel['RelatingPropertyDefinition']  → ItemData (IfcPropertySet)
+ *       pset['Name']                     → Pset name
+ *       pset['HasProperties']            → ItemData[] (IfcPropertySingleValue)
+ *         prop['Name']                   → property name
+ *         prop['NominalValue']           → property value
  */
 function extractPsets(itemData: Record<string, unknown>): IFCProperty[] {
   const props: IFCProperty[] = []
@@ -9175,17 +9210,19 @@ function extractPsets(itemData: Record<string, unknown>): IFCProperty[] {
       const propName = readAttr(prop, 'Name')
       if (!propName) continue
 
-      const nomVal = prop['NominalValue'] as { value: unknown } | undefined
+      // NominalValue may itself be a wrapped IFC value of any scalar type
+      const nomRaw = prop['NominalValue']
       let propValue: string | number | boolean | null = null
 
-      if (nomVal) {
-        let v = nomVal.value
-        if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
+      if (nomRaw !== null && nomRaw !== undefined) {
+        let v: unknown = nomRaw
+        if (typeof v === 'object' && 'value' in (v as object)) {
           v = (v as { value: unknown }).value
         }
-        if (typeof v === 'string'  ||
-            typeof v === 'number'  ||
-            typeof v === 'boolean') {
+        if (typeof v === 'object' && v !== null && 'value' in (v as object)) {
+          v = (v as { value: unknown }).value
+        }
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
           propValue = v
         } else if (v !== null && v !== undefined) {
           propValue = String(v)
@@ -9205,38 +9242,33 @@ export class IFCLoaderWrapper {
   /**
    * Extracts normalized IFCObject[] from a loaded FragmentsModel.
    *
-   * Pipeline (all using documented @thatopen/fragments v3.4.6 APIs):
+   * Pipeline:
    *
    *  1. model.getItemsOfCategories(ELEMENT_CATEGORY_REGEXPS)
    *       → { [categoryKey]: localId[] }
-   *       Filters to physical product entities only. Zero guessing —
-   *       the category list is derived from the library's own ifcClasses.elements.
    *
-   *  2. Collect all localIds → category lookup from the result.
+   *  2. Collect all localIds → category lookup.
    *
    *  3. model.getItemsData(localIds, config)
-   *       → Record<string, ItemData>  (keyed by localId as string, NOT a parallel array)
-   *       config fetches built-in attributes + IsDefinedBy relation for Psets.
-   *       Extracts: GlobalId, Name, Tag, Description, ObjectType, PredefinedType.
+   *
+   *       CONFIRMED item shape (@thatopen/components 3.4.6 / web-ifc 0.0.77):
+   *
+   *         {
+   *           _guid:       { value: "1F6umJ5H50aeL3A1As_wUF" },
+   *           _localId:    { value: 572 },
+   *           _category:   { value: "IFCDOOR" },
+   *           Name:        { value: "M_Single-Flush:Outside door:346843", type: "IFCLABEL" },
+   *           ObjectType:  { value: "M_Single-Flush:Outside door",        type: "IFCLABEL" },
+   *           Tag:         { value: "346843",                             type: "IFCIDENTIFIER" },
+   *           Description: { value: null, ... },
+   *           // ... further wrapped attrs
+   *         }
+   *
+   *       Every field — including _guid, _localId, _category — is a
+   *       { value: <primitive> } wrapper object.  None are bare primitives.
+   *       All are unwrapped via unwrapString() / unwrapNumber().
    *
    *  4. mapRawArrayToIFCObjects() normalises into the app's IFCObject type.
-   *
-   * ─── REGRESSION FIX ────────────────────────────────────────────────────────
-   * The previous implementation accessed itemDataArray[index] treating the
-   * result of getItemsData() as a positionally-aligned array.
-   *
-   * In @thatopen/fragments v3.x, getItemsData() returns a keyed object
-   * (Record<string, ItemData>) where each key is the localId converted to a
-   * string — NOT a positional array indexed 0, 1, 2 ...
-   *
-   * Accessing itemDataArray[0], [1], [2] always returns undefined, so the
-   * guard `if (!data || typeof data !== 'object') return` silently skips
-   * every entity, producing 0 extracted objects despite 6 being found.
-   *
-   * Fix: access itemDataArray[String(localId)] for each localId.
-   * ───────────────────────────────────────────────────────────────────────────
-   *
-   * Any step that fails falls back gracefully.
    */
   async extractObjects(model: FRAGS.FragmentsModel): Promise<IFCObject[]> {
 
@@ -9273,26 +9305,16 @@ export class IFCLoaderWrapper {
     )
 
     // ── Step 3: Fetch attributes + Psets for all products in one call ─────
-    //
-    // IMPORTANT: getItemsData() returns Record<string, ItemData> where each key
-    // is the localId as a string (e.g. "142", "395"). It is NOT a positional
-    // array. Always access results via itemDataMap[String(localId)].
-    //
-    // Config explanation:
-    //   attributesDefault: true  → fetch all built-in IFC attributes
-    //                              (GlobalId, Name, Tag, Description, etc.)
-    //   relations.IsDefinedBy    → traverse the IsDefinedBy relationship so
-    //                              property sets are included in the result
-    let itemDataMap: Record<string, unknown> = {}
+    let itemDataRaw: unknown = {}
     try {
-      itemDataMap = await (model as unknown as {
+      itemDataRaw = await (model as unknown as {
         getItemsData(
           ids:    number[],
           config: {
             attributesDefault: boolean
             relations: Record<string, { attributes: boolean; relations: boolean }>
           }
-        ): Promise<Record<string, unknown>>
+        ): Promise<unknown>
       }).getItemsData(localIds, {
         attributesDefault: true,
         relations: {
@@ -9300,101 +9322,133 @@ export class IFCLoaderWrapper {
         },
       })
     } catch (err) {
-      // Pset config may fail on some models — retry with attributes only
       console.warn('[IFCLoaderWrapper] getItemsData with Psets failed, retrying attributes-only:', err)
       try {
-        itemDataMap = await (model as unknown as {
+        itemDataRaw = await (model as unknown as {
           getItemsData(
             ids:    number[],
             config: { attributesDefault: boolean }
-          ): Promise<Record<string, unknown>>
+          ): Promise<unknown>
         }).getItemsData(localIds, { attributesDefault: true })
       } catch (err2) {
         console.error('[IFCLoaderWrapper] getItemsData attributes-only also failed:', err2)
-        // Last resort: produce minimal objects with just GlobalId from GUIDs
         return this.fallbackToGuidsOnly(model, localIds, localIdToCat)
       }
     }
 
-    // ── Step 3b: Detect return shape ──────────────────────────────────────
+    // ── Step 3b: Detect top-level shape and build a unified item iterator ──
     //
-    // Some versions of the library may still return an array for backwards
-    // compatibility. Detect which shape we received and normalise to a map.
+    // Top-level is either:
+    //   Array  → items positionally aligned with localIds[]
+    //   Object → items keyed by localId string
     //
-    // Shape A (v3.x): Record<string, ItemData>  — keyed by localId string
-    // Shape B (v2.x): ItemData[]                — positionally aligned array
-    //
-    let resolveData: (localId: number, index: number) => Record<string, unknown> | undefined
+    // In both cases each item has the confirmed shape above.
 
-    if (Array.isArray(itemDataMap)) {
-      // Shape B — positional array (legacy)
-      const arr = itemDataMap as Record<string, unknown>[]
-      console.log('[IFCLoaderWrapper] getItemsData returned array (legacy shape)')
-      resolveData = (_localId, index) => arr[index] as Record<string, unknown> | undefined
-    } else {
-      // Shape A — keyed map (v3.x, standard)
-      const map = itemDataMap as Record<string, unknown>
-      console.log('[IFCLoaderWrapper] getItemsData returned keyed map (v3.x shape)')
-      resolveData = (localId, _index) => {
-        // Try both string key and direct numeric key (JS coerces both to string in objects)
-        const entry = map[String(localId)] ?? map[localId as unknown as string]
-        return entry as Record<string, unknown> | undefined
+    console.log('[IFCLoaderWrapper] getItemsData typeof:', typeof itemDataRaw, '| isArray:', Array.isArray(itemDataRaw))
+
+    type RawItem = Record<string, unknown>
+
+    let iterItems: () => Iterable<RawItem>
+
+    if (Array.isArray(itemDataRaw)) {
+      const arr = itemDataRaw as unknown[]
+      console.log('[IFCLoaderWrapper] getItemsData returned array, length:', arr.length)
+      if (arr.length > 0) {
+        const s = arr[0]
+        if (s && typeof s === 'object' && !Array.isArray(s)) {
+          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0] keys:', Object.keys(s as object))
+          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._guid:', (s as RawItem)['_guid'])
+          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._localId:', (s as RawItem)['_localId'])
+          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._category:', (s as RawItem)['_category'])
+        }
       }
+      iterItems = () => arr.filter(
+        (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
+      )
+    } else if (itemDataRaw !== null && typeof itemDataRaw === 'object') {
+      const map = itemDataRaw as Record<string, unknown>
+      const keys = Object.keys(map)
+      console.log('[IFCLoaderWrapper] getItemsData returned keyed map, key count:', keys.length)
+      if (keys.length > 0) {
+        const s = map[keys[0]]
+        if (s && typeof s === 'object' && !Array.isArray(s)) {
+          console.log('[IFCLoaderWrapper] INSTRUMENT map[0] keys:', Object.keys(s as object))
+          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._guid:', (s as RawItem)['_guid'])
+          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._localId:', (s as RawItem)['_localId'])
+          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._category:', (s as RawItem)['_category'])
+        }
+      }
+      iterItems = () => Object.values(map).filter(
+        (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
+      )
+    } else {
+      console.error('[IFCLoaderWrapper] getItemsData returned unexpected type:', typeof itemDataRaw)
+      return this.fallbackToGuidsOnly(model, localIds, localIdToCat)
     }
 
     // ── Step 4: Normalise into RawIFCData ─────────────────────────────────
+    //
+    // Every field is a { value: <primitive> } wrapper — including _guid,
+    // _localId, and _category.  All are unwrapped via unwrapString() /
+    // unwrapNumber() before use.  No field is read as a bare primitive.
+
     const rawItems: Parameters<typeof mapRawArrayToIFCObjects>[0] = []
 
-    localIds.forEach((localId, index) => {
-      // KEY FIX: access by localId key, not by positional index
-      const data = resolveData(localId, index)
-      if (!data || typeof data !== 'object') {
-        console.debug(`[IFCLoaderWrapper] No data for localId ${localId} (index ${index})`)
-        return
-      }
+    for (const item of iterItems()) {
+      // ── Instrument ─────────────────────────────────────────────────────
+      console.log('[IFCLoaderWrapper] INSTRUMENT item keys:', Object.keys(item))
+      console.log('  _guid:', item['_guid'], '| _localId:', item['_localId'], '| _category:', item['_category'])
+      console.log('  Name:', item['Name'], '| ObjectType:', item['ObjectType'], '| Tag:', item['Tag'])
 
-      const globalId       = readAttr(data, 'GlobalId')
+      // ── GlobalId — unwrap _guid.value ──────────────────────────────────
+      const globalId = unwrapString(item['_guid'])
       if (!globalId) {
-        console.debug(`[IFCLoaderWrapper] No GlobalId for localId ${localId}`)
-        return   // Must have a GlobalId to be tracked in the app
+        console.warn('  SKIP: _guid.value missing or empty')
+        continue
       }
 
-      const name           = readAttr(data, 'Name')            ?? 'Unnamed'
-      const tag            = readAttr(data, 'Tag')
-      const description    = readAttr(data, 'Description')
-      const objectType     = readAttr(data, 'ObjectType')
-      const predefinedType = readAttr(data, 'PredefinedType')
+      // ── ExpressId — unwrap _localId.value as a number ──────────────────
+      const expressId = unwrapNumber(item['_localId'])
 
-      // Category key from the library may be:
-      //   (a) uppercase name: "IFCWALLSTANDARDCASE"
-      //   (b) numeric code:   "659739252"
-      // categoryKeyToIfcType() handles both cases and produces PascalCase.
-      const rawCat  = localIdToCat.get(localId) ?? 'IFCBUILDINGELEMENTPROXY'
+      // ── IFC type — unwrap _category.value, fall back to localIdToCat ───
+      const rawCatFromItem = unwrapString(item['_category'])
+      const rawCat = rawCatFromItem
+        ?? (expressId !== undefined ? localIdToCat.get(expressId) : undefined)
+        ?? 'IFCBUILDINGELEMENTPROXY'
       const ifcType = categoryKeyToIfcType(rawCat)
 
-      const properties = extractPsets(data)
+      // ── Named attribute fields — all wrapped; readAttr() unwraps them ───
+      const name           = readAttr(item, 'Name')         ?? 'Unnamed'
+      const tag            = readAttr(item, 'Tag')
+      const description    = readAttr(item, 'Description')
+      const objectType     = readAttr(item, 'ObjectType')
+      const predefinedType = readAttr(item, 'PredefinedType')
+
+      // ── Psets ───────────────────────────────────────────────────────────
+      const properties = extractPsets(item)
+
+      console.log(`  → ACCEPTED globalId=${globalId} expressId=${expressId} name="${name}" type=${ifcType}`)
 
       rawItems.push({
         globalId,
-        expressId:  localId,
+        ...(expressId !== undefined && { expressId }),
         name,
-        type:       ifcType,
+        type: ifcType,
         ...(tag            !== null && { tag }),
         ...(description    !== null && { description }),
         ...(objectType     !== null && { objectType }),
         ...(predefinedType !== null && { predefinedType }),
         ...(properties.length > 0   && { properties }),
       })
-    })
+    }
 
     console.log(`[IFCLoaderWrapper] Extracted ${rawItems.length} IFC objects`)
     return mapRawArrayToIFCObjects(rawItems)
   }
 
   /**
-   * Last-resort fallback: if getItemsData is completely unavailable,
-   * produce minimal IFCObjects using only getGuidsByLocalIds().
-   * Name will be 'Unnamed' but count and type will be correct.
+   * Last-resort fallback: produce minimal IFCObjects using only
+   * getGuidsByLocalIds(). Names will be 'Unnamed' but count and type correct.
    */
   private async fallbackToGuidsOnly(
     model:         FRAGS.FragmentsModel,

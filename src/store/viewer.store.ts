@@ -1,14 +1,5 @@
-/**
- * Viewer store — Phase 2 update.
- *
- * Now tracks real IFC loading state in addition to
- * the viewer engine reference. The ViewerEngine instance
- * is stored as a ref outside React — this store only
- * holds serializable state.
- */
-
 import { create } from 'zustand'
-import type { IFCObject } from '../types'
+import type { IFCObject, IFCSpatialTree } from '../types'
 
 export type RenderMode = 'perspective' | 'top' | 'front' | 'wireframe'
 
@@ -19,8 +10,16 @@ export type ModelLoadState =
   | 'error'       // Load failed
 
 interface ViewerState {
-  /** All IFC objects currently loaded */
+  /** All IFC objects currently loaded (physical elements only) */
   ifcObjects:       IFCObject[]
+
+  /**
+   * The IFC spatial decomposition tree.
+   * Built from IFCRELAGGREGATES + IFCRELCONTAINEDINSPATIALSTRUCTURE.
+   * null when no model is loaded or extraction failed.
+   */
+  spatialTree:      IFCSpatialTree | null
+
   /** Current model load state */
   modelLoadState:   ModelLoadState
   /** Error message if modelLoadState === 'error' */
@@ -36,6 +35,7 @@ interface ViewerState {
 
   // ── Actions ──────────────────────────────────────────────
   setIFCObjects:      (objects: IFCObject[]) => void
+  setSpatialTree:     (tree: IFCSpatialTree | null) => void
   setModelLoadState:  (state: ModelLoadState) => void
   setModelError:      (error: string | null) => void
   setModelMeta:       (fileName: string, fileSize: number) => void
@@ -47,6 +47,7 @@ interface ViewerState {
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
   ifcObjects:      [],
+  spatialTree:     null,
   modelLoadState:  'idle',
   modelError:      null,
   modelFileName:   null,
@@ -55,6 +56,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   renderMode:      'perspective',
 
   setIFCObjects:     (objects) => set({ ifcObjects: objects }),
+  setSpatialTree:    (tree)    => set({ spatialTree: tree }),
   setModelLoadState: (state)   => set({ modelLoadState: state }),
   setModelError:     (error)   => set({ modelError: error }),
   setModelMeta:      (fileName, fileSize) => set({ modelFileName: fileName, modelFileSize: fileSize }),
@@ -63,6 +65,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   resetModel: () => set({
     ifcObjects:    [],
+    spatialTree:   null,
     modelLoadState:'idle',
     modelError:    null,
     modelFileName: null,

@@ -1,9 +1,9 @@
 import { useRef, useState, useCallback, type DragEvent } from 'react'
-import { useViewerStore } from '../../store/viewer.store'
+import { useViewerStore }    from '../../store/viewer.store'
 import { useSelectionStore } from '../../store/selection.store'
 import { useSimulationStore } from '../../store/simulation.store'
-import { useLayerStore } from '../../store/layer.store'
-import { IFCParserService } from '../../services/ifc/IFCParserService'
+import { useLayerStore }     from '../../store/layer.store'
+import { IFCParserService }  from '../../services/ifc/IFCParserService'
 import type { ViewerEngine } from '../../viewer/ViewerEngine'
 
 interface IFCUploadZoneProps {
@@ -18,6 +18,7 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
   const setModelLoadState   = useViewerStore(s => s.setModelLoadState)
   const setModelError       = useViewerStore(s => s.setModelError)
   const setIFCObjects       = useViewerStore(s => s.setIFCObjects)
+  const setSpatialTree      = useViewerStore(s => s.setSpatialTree)   // NEW
   const setModelMeta        = useViewerStore(s => s.setModelMeta)
   const modelLoadState      = useViewerStore(s => s.modelLoadState)
   const modelError          = useViewerStore(s => s.modelError)
@@ -37,22 +38,16 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
     }
 
     // ── Step 1: Unload the previous 3D model ─────────────────
-    // model.dispose() frees the worker thread slot, shared
-    // MaterialManager entries, GPU tile geometry, and removes
-    // model.object from the Three.js scene.
-    // Must happen before store resets so colour/selection effects
-    // that read loadedModels do not fire against stale data.
     try {
       await viewerEngine.unloadAll()
     } catch (err) {
       console.warn('[IFCUploadZone] unloadAll warning:', err)
-      // Non-fatal — proceed with load
     }
 
     // ── Step 2: Clear all application state ──────────────────
-    clearSelection()          // Inspector empties, Gantt deselects
-    deactivateSimulation()    // Removes simulation colour overlay
-    clearLayerFilters()       // Resets layer filter panel
+    clearSelection()
+    deactivateSimulation()
+    clearLayerFilters()
 
     // ── Step 3: Transition to loading state ──────────────────
     setModelLoadState('loading')
@@ -69,10 +64,10 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
       return
     }
 
-    // IMPORTANT: set ifcObjects BEFORE setting modelLoadState to 'loaded'
-    // so any component reading ifcObjects.length on state change
-    // already has the correct value.
+    // IMPORTANT: set objects and spatial tree BEFORE setting modelLoadState
+    // to 'loaded' so the Object Explorer already has data when it re-renders.
     setIFCObjects(result.ifcObjects)
+    setSpatialTree(result.spatialTree)   // NEW — may be null if extraction failed
     setModelLoadState('loaded')
 
     if (result.error) {
@@ -86,6 +81,7 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
     setModelError,
     setModelMeta,
     setIFCObjects,
+    setSpatialTree,
     clearSelection,
     deactivateSimulation,
     clearLayerFilters,
@@ -108,7 +104,6 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
   const handleInputChange = useCallback(() => {
     const file = inputRef.current?.files?.[0]
     if (file) handleFile(file)
-    // Reset input so same file can be re-selected
     if (inputRef.current) inputRef.current.value = ''
   }, [handleFile])
 

@@ -68,15 +68,17 @@ export interface IFCObject {
 }
 
 /**
- * A single IFC property from a property set.
+ * A single IFC property from a property set or quantity set.
  */
 export interface IFCProperty {
-  /** Name of the property set (e.g. "Pset_WallCommon") */
+  /** Name of the property set (e.g. "Pset_WallCommon") or quantity set (e.g. "BaseQuantities") */
   set: string
   /** Property name */
   name: string
   /** Property value — typed to match IFC value types */
   value: string | number | boolean | null
+  /** Optional unit string (e.g. "m", "m²", "m³") extracted from IfcQuantity* */
+  unit?: string
 }
 
 /**
@@ -92,12 +94,88 @@ export interface IFCClassification {
   label: string
 }
 
+// ─── Spatial tree ─────────────────────────────────────────────────────────────
+
+/**
+ * A node in the IFC spatial decomposition tree.
+ *
+ * Spatial nodes (IfcProject / IfcSite / IfcBuilding / IfcBuildingStorey / IfcSpace)
+ * have their children listed in childGlobalIds.
+ *
+ * Physical element nodes (walls, doors, etc.) have no children in this tree —
+ * their storey membership is captured in IFCSpatialTree.elementsByStorey.
+ */
+export interface IFCSpatialNode {
+  globalId:   string
+  expressId?: number
+  name:       string
+  ifcType:    string
+  /** GlobalIds of child spatial nodes (from IfcRelAggregates) */
+  childGlobalIds: string[]
+}
+
+/**
+ * The fully resolved IFC spatial decomposition extracted from
+ * IFCRELAGGREGATES and IFCRELCONTAINEDINSPATIALSTRUCTURE.
+ *
+ * Produced once by IFCLoaderWrapper and stored in viewer.store.
+ * Consumed by IFCObjectTree to render the correct hierarchy.
+ */
+export interface IFCSpatialTree {
+  /**
+   * Ordered list of root node GlobalIds (usually one IfcProject).
+   */
+  rootIds: string[]
+
+  /**
+   * Map from spatial node GlobalId → IFCSpatialNode.
+   * Covers IfcProject, IfcSite, IfcBuilding, IfcBuildingStorey, IfcSpace.
+   */
+  spatialNodes: Map<string, IFCSpatialNode>
+
+  /**
+   * Map from storey GlobalId → array of physical element GlobalIds
+   * contained in that storey (from IFCRELCONTAINEDINSPATIALSTRUCTURE).
+   *
+   * Elements that have no storey membership appear in the special key
+   * "__unassigned__".
+   */
+  elementsByStorey: Map<string, string[]>
+
+  /**
+   * Map from element GlobalId → storey GlobalId (reverse of elementsByStorey).
+   * Used for O(1) storey lookup during ancestor-path building in the tree.
+   */
+  storeyByElement: Map<string, string>
+
+  /**
+   * Map from physical element GlobalId → opening element GlobalIds
+   * (from IFCRELVOIDSELEMENT).  E.g. wall → [opening1, opening2]
+   */
+  elementToOpenings: Map<string, string[]>
+
+  /**
+   * Map from opening element GlobalId → filler GlobalIds
+   * (from IFCRELFILLSELEMENT). E.g. opening → [door]
+   */
+  openingToFillers: Map<string, string[]>
+
+  /**
+   * Basic info (name + ifcType) for each opening element.
+   * Allows the tree to label opening nodes correctly.
+   */
+  openingDetails: Map<string, { name: string; ifcType: string }>
+}
+
+// ─── IFC Types ────────────────────────────────────────────────────────────────
+
 /**
  * Supported IFC entity types.
  * Extendable — add new types here as the model grows.
  */
 export type IFCType =
   | 'IfcWall'
+  | 'IfcWallStandardCase'
   | 'IfcSlab'
   | 'IfcColumn'
   | 'IfcBeam'
@@ -110,11 +188,15 @@ export type IFCType =
   | 'IfcRoof'
   | 'IfcFoundation'
   | 'IfcBuildingElementProxy'
+  | 'IfcProject'
+  | 'IfcSite'
+  | 'IfcBuilding'
+  | 'IfcBuildingStorey'
+  | 'IfcSpace'
   | string // Allow any IFC type string for forward compatibility
 
 /**
  * Supported classification systems.
- * Extendable for future AI and standard system integrations.
  */
 export type IFCClassificationSystem =
   | 'CoClass'
