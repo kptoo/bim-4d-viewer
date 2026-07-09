@@ -35,7 +35,8 @@ interface ViewerState {
 
   /**
    * Engine action: zoom the camera to fit a single IFC object.
-   * Set by IFCViewer once the ViewerEngine is ready.
+   * Set by IFCViewer once the ViewerEngine is ready (onSceneReady).
+   * Persists across model loads — only cleared on ViewerEngine disposal.
    * null when no engine is mounted.
    */
   zoomToObject:     ((globalId: string) => void) | null
@@ -43,7 +44,8 @@ interface ViewerState {
   /**
    * Engine action: isolate one or more IFC objects (hide all others).
    * Passing an empty array restores full visibility.
-   * Set by IFCViewer once the ViewerEngine is ready.
+   * Set by IFCViewer once the ViewerEngine is ready (onSceneReady).
+   * Persists across model loads — only cleared on ViewerEngine disposal.
    * null when no engine is mounted.
    */
   isolateObjects:   ((globalIds: string[]) => void) | null
@@ -95,15 +97,40 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     isolateObjects: null,
   }),
 
+  // ── FIX: resetModel resets only MODEL data and load state. ──────────────
+  //
+  // It must NOT null zoomToObject / isolateObjects.
+  //
+  // Root cause of the bug:
+  //   The "Load New Model" button in Layout.tsx calls resetModel() before the
+  //   user uploads the next file.  resetModel previously nulled the engine
+  //   action callbacks.  Because setEngineActions is only called once — inside
+  //   onSceneReady, which fires only during ViewerEngine.init() at component
+  //   mount — those callbacks were never restored after a model replacement.
+  //   Result: Zoom / Isolate buttons remained permanently disabled for every
+  //   model loaded after the first.
+  //
+  // Engine action callbacks (zoomToObject / isolateObjects) are closures that
+  // reference the live ViewerEngine via engineRef.current.  The ViewerEngine
+  // instance is created once at IFCViewer mount and persists across model
+  // loads.  The callbacks remain valid as long as the engine is alive.
+  //
+  // Responsibility split:
+  //   • resetModel()        — clears MODEL data only (objects, tree, state,
+  //                           meta).  Never touches engine action callbacks.
+  //   • clearEngineActions() — called only in the IFCViewer mount-effect
+  //                            cleanup (i.e. on engine disposal / unmount).
+  //                            This is the only correct place to null them.
+  //
   resetModel: () => set({
-    ifcObjects:    [],
-    spatialTree:   null,
-    modelLoadState:'idle',
-    modelError:    null,
-    modelFileName: null,
-    modelFileSize: null,
-    zoomToObject:  null,
-    isolateObjects: null,
+    ifcObjects:     [],
+    spatialTree:    null,
+    modelLoadState: 'idle',
+    modelError:     null,
+    modelFileName:  null,
+    modelFileSize:  null,
+    // zoomToObject  and isolateObjects are intentionally NOT reset here.
+    // See comment above.
   }),
 
   getObjectByGlobalId: (globalId) =>

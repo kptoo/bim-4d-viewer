@@ -25,6 +25,10 @@ export default function IFCViewer() {
   const setEngineActions    = useViewerStore(s => s.setEngineActions)
   const clearEngineActions  = useViewerStore(s => s.clearEngineActions)
 
+  // Read current action slots so we can detect when they are null
+  const zoomToObject    = useViewerStore(s => s.zoomToObject)
+  const isolateObjects  = useViewerStore(s => s.isolateObjects)
+
   const selectedGlobalIds  = useSelectionStore(s => s.selectedGlobalIds)
   const primaryGlobalId    = useSelectionStore(s => s.primaryGlobalId)
   const selectObject       = useSelectionStore(s => s.selectObject)
@@ -53,11 +57,13 @@ export default function IFCViewer() {
       container,
 
       onObjectPicked: (globalId, isMulti) => {
+        console.log('[IFCViewer] onObjectPicked — globalId:', globalId, 'isMulti:', isMulti)
         if (globalId) selectObject(globalId, isMulti)
         else          clearSelection()
       },
 
       onSceneReady: () => {
+        console.log('[IFCViewer] onSceneReady — registering engine actions')
         setSceneReady(true)
 
         // ── Register engine action callbacks into the store ──
@@ -65,19 +71,23 @@ export default function IFCViewer() {
         // before any component can call the callbacks.
         setEngineActions(
           (globalId: string) => {
+            console.log('[IFCViewer] zoomToObject called — globalId:', globalId)
             engineRef.current?.zoomToObject(globalId).catch(console.warn)
           },
           (globalIds: string[]) => {
+            console.log('[IFCViewer] isolateObjects called — count:', globalIds.length)
             engineRef.current?.isolateObjects(globalIds).catch(console.warn)
           }
         )
       },
 
       onModelLoaded: (_count) => {
+        console.log('[IFCViewer] onModelLoaded — objectCount:', _count)
         setModelLoadState('loaded')
       },
 
       onError: (message) => {
+        console.warn('[IFCViewer] onError —', message)
         addError(message, '3D Viewer')
         setModelError(message)
         setModelLoadState('error')
@@ -94,6 +104,7 @@ export default function IFCViewer() {
     engineRef.current = engine
 
     return () => {
+      console.log('[IFCViewer] disposing ViewerEngine')
       engine.dispose()
       engineRef.current = null
       setSceneReady(false)
@@ -103,14 +114,79 @@ export default function IFCViewer() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ── Guard: re-register engine actions if they were wiped ─
+  //
+  // This is a belt-and-suspenders safety net. The primary fix is in
+  // viewer.store.ts (resetModel no longer nulls the callbacks). However,
+  // if any code path ever nulls zoomToObject / isolateObjects while the
+  // engine is still alive, this effect immediately restores them.
+  //
+  // It fires whenever sceneReady becomes true OR whenever the callbacks
+  // are discovered to be null while the engine is live.
+  //
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine || !sceneReady) return
+    if (zoomToObject !== null && isolateObjects !== null) return
+
+    console.warn(
+      '[IFCViewer] ⚠ Engine action callbacks are null while engine is alive — restoring.',
+      'zoomToObject:', zoomToObject,
+      'isolateObjects:', isolateObjects,
+    )
+
+    setEngineActions(
+      (globalId: string) => {
+        console.log('[IFCViewer] zoomToObject (restored) — globalId:', globalId)
+        engineRef.current?.zoomToObject(globalId).catch(console.warn)
+      },
+      (globalIds: string[]) => {
+        console.log('[IFCViewer] isolateObjects (restored) — count:', globalIds.length)
+        engineRef.current?.isolateObjects(globalIds).catch(console.warn)
+      }
+    )
+  }, [sceneReady, zoomToObject, isolateObjects, setEngineActions])
+
   // ── Unload 3D scene when state returns to idle ───────────
   useEffect(() => {
     if (modelLoadState !== 'idle') return
     const engine = engineRef.current
     if (!engine) return
+    console.log('[IFCViewer] modelLoadState → idle, calling unloadAll')
     engine.unloadAll().catch(err => {
       console.warn('[IFCViewer] unloadAll on idle transition:', err)
     })
+  }, [modelLoadState])
+
+  // ── Debug: log selection changes ─────────────────────────
+  useEffect(() => {
+    console.log(
+      '[IFCViewer] Selection changed —',
+      'primaryGlobalId:', primaryGlobalId,
+      'selectedCount:', selectedGlobalIds.size,
+    )
+    const store = useViewerStore.getState()
+    console.log(
+      '[IFCViewer] Engine action state —',
+      'zoomToObject:', store.zoomToObject !== null ? '✅ set' : '❌ null',
+      'isolateObjects:', store.isolateObjects !== null ? '✅ set' : '❌ null',
+    )
+  }, [primaryGlobalId, selectedGlobalIds])
+
+  // ── Debug: log modelLoadState transitions ─────────────────
+  useEffect(() => {
+    console.log('[IFCViewer] modelLoadState →', modelLoadState)
+    if (modelLoadState === 'loaded') {
+      const store = useViewerStore.getState()
+      const loadedModels = engineRef.current?.getLoadedModels() ?? []
+      console.log(
+        '[IFCViewer] Model loaded —',
+        'ifcObjects in store:', useViewerStore.getState().ifcObjects.length,
+        'loadedModels in engine:', loadedModels.length,
+        'zoomToObject:', store.zoomToObject !== null ? '✅ set' : '❌ null',
+        'isolateObjects:', store.isolateObjects !== null ? '✅ set' : '❌ null',
+      )
+    }
   }, [modelLoadState])
 
   // ── Effect 1: Simulation color overlay ──────────────────

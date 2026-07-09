@@ -28,6 +28,57 @@ FILE: index.html
 
 
 ====================================================================================================
+FILE: migrations\001_create_layers.sql
+====================================================================================================
+
+-- ============================================================
+-- Migration 001 — Information Layers + Assignments
+-- Target: Neon PostgreSQL
+-- Run once against your Neon project.
+-- ============================================================
+
+-- Enable UUID generation (available in all Neon projects)
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ── information_layers ──────────────────────────────────────
+CREATE TABLE IF NOT EXISTS information_layers (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT        NOT NULL,
+  category    TEXT        NOT NULL DEFAULT 'custom',
+  color       TEXT        NOT NULL DEFAULT '#3498DB',
+  description TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Index for listing layers by creation date
+CREATE INDEX IF NOT EXISTS idx_layers_created_at
+  ON information_layers (created_at DESC);
+
+-- ── layer_assignments ────────────────────────────────────────
+-- Links an IFC GlobalId to one or more information layers.
+-- global_id is the stable IFC identifier — NOT a FK to any
+-- other table because IFC objects are runtime data, not DB rows.
+CREATE TABLE IF NOT EXISTS layer_assignments (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  layer_id    UUID        NOT NULL REFERENCES information_layers (id) ON DELETE CASCADE,
+  global_id   TEXT        NOT NULL,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Prevent duplicate (layer, object) pairs
+  UNIQUE (layer_id, global_id)
+);
+
+-- Indexes for the two common query patterns:
+--   • Fetch all assignments for a layer
+--   • Fetch all layers for an IFC object
+CREATE INDEX IF NOT EXISTS idx_assignments_layer_id
+  ON layer_assignments (layer_id);
+
+CREATE INDEX IF NOT EXISTS idx_assignments_global_id
+  ON layer_assignments (global_id);
+
+
+====================================================================================================
 FILE: package-lock.json
 ====================================================================================================
 
@@ -41,6 +92,8 @@ FILE: package-lock.json
       "name": "bim-4d-viewer",
       "version": "2.0.0",
       "dependencies": {
+        "@neondatabase/serverless": "^1.1.0",
+        "@tanstack/react-query": "^5.101.2",
         "@thatopen/components": "^3.4.6",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
@@ -804,6 +857,15 @@ FILE: package-lock.json
         "@jridgewell/sourcemap-codec": "^1.4.14"
       }
     },
+    "node_modules/@neondatabase/serverless": {
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/@neondatabase/serverless/-/serverless-1.1.0.tgz",
+      "integrity": "sha512-r3ZZhRjEcfEdKIZnoB1RusNgvHuaBRqfCzV4Gi+5A9yUX0S4HTws/ASWqt13wL4y4I+0rqsWGdA2w7EQXHi3+Q==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=19.0.0"
+      }
+    },
     "node_modules/@nodable/entities": {
       "version": "2.2.0",
       "resolved": "https://registry.npmjs.org/@nodable/entities/-/entities-2.2.0.tgz",
@@ -1511,6 +1573,32 @@ FILE: package-lock.json
       "integrity": "sha512-jYqeckrzZGAU+9OSfmL15MWfhkKWRCC8QMssL/MZu/MaIP76mU3VHjzqxlwKIz9DOSR/9jCqi1+QlWE0ILNehA==",
       "dev": true,
       "license": "Apache-2.0"
+    },
+    "node_modules/@tanstack/query-core": {
+      "version": "5.101.2",
+      "resolved": "https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.101.2.tgz",
+      "integrity": "sha512-hH5MLoJhF7KaIGd7q3xTXGXvslI+GYlM1Z/35aSHHWaCJWB7XvTSHYuV3eM7tw+aE0mT/xMro4M4Q9rCGHT0lw==",
+      "license": "MIT",
+      "funding": {
+        "type": "github",
+        "url": "https://github.com/sponsors/tannerlinsley"
+      }
+    },
+    "node_modules/@tanstack/react-query": {
+      "version": "5.101.2",
+      "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.101.2.tgz",
+      "integrity": "sha512-seDkr6kzGzX1okaaTtZPtgA688CDPlXUz1C6xSg0ESqn04Vuc8tlrYms1s3de+znBqhPVxFRfpAfUf+6XvfPWg==",
+      "license": "MIT",
+      "dependencies": {
+        "@tanstack/query-core": "5.101.2"
+      },
+      "funding": {
+        "type": "github",
+        "url": "https://github.com/sponsors/tannerlinsley"
+      },
+      "peerDependencies": {
+        "react": "^18 || ^19"
+      }
     },
     "node_modules/@thatopen/components": {
       "version": "3.4.6",
@@ -3614,36 +3702,35 @@ FILE: package.json
 
 {
   "name": "bim-4d-viewer",
-  "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev":     "vite",
+    "build":   "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:ui": "vitest --ui"
+    "test":    "vitest"
   },
   "dependencies": {
-    "@thatopen/components": "^3.4.6",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "three": "^0.182.0",
-    "web-ifc": "^0.0.77",
-    "zustand": "^4.4.7"
+    "@neondatabase/serverless": "^0.10.4",
+    "@tanstack/react-query":   "^5.56.2",
+    "@thatopen/components":    "^3.4.6",
+    "react":                   "^18.2.0",
+    "react-dom":               "^18.2.0",
+    "three":                   "^0.182.0",
+    "web-ifc":                 "^0.0.77",
+    "zustand":                 "^4.4.7"
   },
   "devDependencies": {
-    "@types/react": "^18.2.48",
-    "@types/react-dom": "^18.2.18",
-    "@types/three": "latest",
-    "@vitejs/plugin-react": "^4.2.1",
-    "@vitest/ui": "^1.2.0",
-    "typescript": "^5.3.3",
-    "vite": "^5.0.8",
+    "@types/react":                "^18.2.48",
+    "@types/react-dom":            "^18.2.18",
+    "@types/three":                "latest",
+    "@vitejs/plugin-react":        "^4.2.1",
+    "@vitest/ui":                  "^1.2.0",
+    "typescript":                  "^5.3.3",
+    "vite":                        "^5.0.8",
     "vite-plugin-top-level-await": "^1.4.4",
-    "vite-plugin-wasm": "^3.3.0",
-    "vitest": "^1.2.0"
+    "vite-plugin-wasm":            "^3.3.0",
+    "vitest":                      "^1.2.0"
   }
 }
 
@@ -3840,6 +3927,40 @@ const styles: Record<string, React.CSSProperties> = {
     cursor:        'pointer',
     fontSize:      '13px',
   },
+}
+
+
+====================================================================================================
+FILE: src\app\providers\QueryProvider.tsx
+====================================================================================================
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime:        60_000,        // 1 minute
+      gcTime:           5 * 60_000,   // 5 minutes
+      retry:            2,
+      refetchOnWindowFocus: false,     // BIM app — no need to refetch on focus
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+})
+
+interface QueryProviderProps {
+  children: ReactNode
+}
+
+export default function QueryProvider({ children }: QueryProviderProps) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  )
 }
 
 
@@ -5571,31 +5692,34 @@ export default function GanttPanel() {
 FILE: src\components\IFCInspector.tsx
 ====================================================================================================
 
-import { useState, useCallback, useMemo, memo } from 'react'
-import { useSelectionStore }   from '../store/selection.store'
-import { useViewerStore }      from '../store/viewer.store'
-import { useActivityStore }    from '../store/activity.store'
-import { useSimulationStore }  from '../store/simulation.store'
-import { useLayerStore }       from '../store/layer.store'
-import { ifcTypeIcon }         from '../utils/ifc.utils'
-import type { Activity, IFCObject, IFCProperty, SimulationStatus } from '../types'
+import {
+  useState, useCallback, useMemo, memo,
+} from 'react'
+import type { ReactNode } from 'react'
+import { useSelectionStore }  from '../store/selection.store'
+import { useViewerStore }     from '../store/viewer.store'
+import { useActivityStore }   from '../store/activity.store'
+import { useLayerStore }      from '../store/layer.store'
+import { useSimulationStore } from '../store/simulation.store'
+import { ifcTypeIcon }        from '../utils/ifc.utils'
+import type { IFCObject, IFCProperty, Activity, SimulationStatus } from '../types'
 
 // ─── Status labels ────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<SimulationStatus, string> = {
-  completed: 'Completed',
-  active:    'In Progress',
   future:    'Upcoming',
+  active:    'Active',
+  completed: 'Completed',
 }
 
-// ─── Collapsible section ──────────────────────────────────────────────────────
+// ─── Section ──────────────────────────────────────────────────────────────────
 
 interface SectionProps {
   title:        string
   defaultOpen?: boolean
-  badge?:       string | number
+  badge?:       number
   accentColor?: string
-  children:     React.ReactNode
+  children:     ReactNode
 }
 
 const Section = memo(function Section({
@@ -5630,7 +5754,7 @@ const Section = memo(function Section({
 
 interface PropRowProps {
   label:     string
-  value:     React.ReactNode
+  value:     ReactNode
   copyText?: string
   mono?:     boolean
 }
@@ -5683,7 +5807,6 @@ function PropertyValue({ prop }: { prop: IFCProperty }) {
     )
   }
 
-  // String
   const str = String(value)
   if (str === 'true')  return <span className="insp-bool-chip insp-bool-chip--yes">Yes</span>
   if (str === 'false') return <span className="insp-bool-chip insp-bool-chip--no">No</span>
@@ -5755,14 +5878,24 @@ function ActivityCard({ activity, status }: { activity: Activity; status: Simula
 // ─── Main inspector ───────────────────────────────────────────────────────────
 
 export default function IFCInspector() {
+  // ── Selection state ────────────────────────────────────────
   const primaryGlobalId        = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds      = useSelectionStore(s => s.selectedGlobalIds)
   const selectedActivityId     = useSelectionStore(s => s.selectedActivityId)
+
+  // ── Domain data ───────────────────────────────────────────
   const getObjectByGlobalId    = useViewerStore(s => s.getObjectByGlobalId)
+  const zoomToObject           = useViewerStore(s => s.zoomToObject)
+  const isolateObjects         = useViewerStore(s => s.isolateObjects)
   const getActivitiesForObject = useActivityStore(s => s.getActivitiesForObject)
   const getActivityById        = useActivityStore(s => s.getActivityById)
   const getLayersForObject     = useLayerStore(s => s.getLayersForObject)
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
+
+  // ── Isolation toggle state ─────────────────────────────────
+  // Tracks whether the current view is in isolation mode.
+  const [isIsolated, setIsIsolated] = useState(false)
 
   const ifcObject: IFCObject | undefined | null = primaryGlobalId
     ? getObjectByGlobalId(primaryGlobalId)
@@ -5781,7 +5914,7 @@ export default function IFCInspector() {
     ? (frames.get(ifcObject.globalId)?.status ?? 'future')
     : 'future'
 
-  // ── Group and sort property sets ─────────────────────────────────────────
+  // ── Group and sort property sets ──────────────────────────
   const { psetNames, psetMap } = useMemo(() => {
     if (!ifcObject) return { psetNames: [], psetMap: new Map<string, IFCProperty[]>() }
 
@@ -5792,11 +5925,6 @@ export default function IFCInspector() {
       map.set(prop.set, arr)
     }
 
-    // Sort order:
-    //   0 — BaseQuantities (canonical quantity set)
-    //   1 — Qto_*  (quantity sets)
-    //   2 — Pset_* (standard property sets)
-    //   3 — everything else (custom / vendor)
     const names = Array.from(map.keys()).sort((a, b) => {
       const rank = (n: string) =>
         n === 'BaseQuantities'  ? 0 :
@@ -5808,7 +5936,42 @@ export default function IFCInspector() {
     return { psetNames: names, psetMap: map }
   }, [ifcObject])
 
-  // ── Empty state ───────────────────────────────────────────────────────────
+  // ── Action handlers ───────────────────────────────────────
+
+  const handleZoom = useCallback(() => {
+    if (!ifcObject || !zoomToObject) return
+    console.log('[IFCInspector] Zoom to', ifcObject.globalId)
+    zoomToObject(ifcObject.globalId)
+  }, [ifcObject, zoomToObject])
+
+  const handleIsolate = useCallback(() => {
+    if (!ifcObject || !isolateObjects) return
+
+    if (isIsolated) {
+      // Second press — restore full visibility
+      console.log('[IFCInspector] Restore visibility (end isolation)')
+      isolateObjects([])
+      setIsIsolated(false)
+    } else {
+      // First press — isolate the selected objects
+      // If multiple objects are selected, isolate all of them
+      const targets = selectedGlobalIds.size > 1
+        ? Array.from(selectedGlobalIds)
+        : [ifcObject.globalId]
+      console.log('[IFCInspector] Isolate', targets)
+      isolateObjects(targets)
+      setIsIsolated(true)
+    }
+  }, [ifcObject, isolateObjects, isIsolated, selectedGlobalIds])
+
+  // Reset isolation state when selection changes
+  // so the button label stays consistent
+  const prevGlobalId = primaryGlobalId
+  if (isIsolated && prevGlobalId !== primaryGlobalId) {
+    setIsIsolated(false)
+  }
+
+  // ── Empty state ───────────────────────────────────────────
   if (!ifcObject) {
     return (
       <div className="insp-empty">
@@ -5918,17 +6081,35 @@ export default function IFCInspector() {
       <div className="insp-actions">
         <button
           className="action-btn"
-          onClick={() => console.log('Zoom to', ifcObject.globalId)}
-        >🔍 Zoom To</button>
+          onClick={handleZoom}
+          disabled={!zoomToObject}
+          title={zoomToObject ? 'Zoom camera to this element' : 'Viewer not ready'}
+        >
+          🔍 Zoom To
+        </button>
         <button
-          className="action-btn"
-          onClick={() => console.log('Isolate', ifcObject.globalId)}
-        >💡 Isolate</button>
+          className={`action-btn${isIsolated ? ' action-btn--active' : ''}`}
+          onClick={handleIsolate}
+          disabled={!isolateObjects}
+          title={
+            !isolateObjects
+              ? 'Viewer not ready'
+              : isIsolated
+                ? 'Restore full model visibility'
+                : selectedGlobalIds.size > 1
+                  ? `Isolate ${selectedGlobalIds.size} selected elements`
+                  : 'Hide all other elements'
+          }
+        >
+          {isIsolated ? '👁 Show All' : '💡 Isolate'}
+        </button>
         <button
           className="action-btn"
           disabled={!linkedActivity}
           onClick={() => console.log('Show activity', linkedActivity?.id)}
-        >📋 Activity</button>
+        >
+          📋 Activity
+        </button>
       </div>
 
     </div>
@@ -6601,37 +6782,48 @@ FILE: src\components\IFCViewer.tsx
 ====================================================================================================
 
 import { useEffect, useRef } from 'react'
-import { ViewerEngine } from '../viewer/ViewerEngine'
-import { useViewerStore } from '../store/viewer.store'
-import { useSelectionStore } from '../store/selection.store'
-import { useSimulationStore } from '../store/simulation.store'
-import { useActivityStore } from '../store/activity.store'
-import { useUIStore } from '../store/ui.store'
-import IFCUploadZone from '../features/viewer/IFCUploadZone'
+import { ViewerEngine }        from '../viewer/ViewerEngine'
+import { useViewerStore }      from '../store/viewer.store'
+import { useSelectionStore }   from '../store/selection.store'
+import { useSimulationStore }  from '../store/simulation.store'
+import { useActivityStore }    from '../store/activity.store'
+import { useUIStore }          from '../store/ui.store'
+import { useLayerStore }       from '../store/layer.store'
+import { FilterEngine }        from '../core/filter/FilterEngine'
+import IFCUploadZone           from '../features/viewer/IFCUploadZone'
+import { useAllAssignments, useGlobalIdLayerMap } from '../hooks/useAssignments'
 
 export default function IFCViewer() {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef    = useRef<ViewerEngine | null>(null)
 
   // ── Store reads ──────────────────────────────────────────
-  const ifcObjects        = useViewerStore(s => s.ifcObjects)
-  const modelLoadState    = useViewerStore(s => s.modelLoadState)
-  const sceneReady        = useViewerStore(s => s.sceneReady)
-  const setSceneReady     = useViewerStore(s => s.setSceneReady)
-  const setModelLoadState = useViewerStore(s => s.setModelLoadState)
-  const setModelError     = useViewerStore(s => s.setModelError)
-  const resetModel        = useViewerStore(s => s.resetModel)
+  const ifcObjects          = useViewerStore(s => s.ifcObjects)
+  const modelLoadState      = useViewerStore(s => s.modelLoadState)
+  const sceneReady          = useViewerStore(s => s.sceneReady)
+  const setSceneReady       = useViewerStore(s => s.setSceneReady)
+  const setModelLoadState   = useViewerStore(s => s.setModelLoadState)
+  const setModelError       = useViewerStore(s => s.setModelError)
+  const resetModel          = useViewerStore(s => s.resetModel)
+  const setEngineActions    = useViewerStore(s => s.setEngineActions)
+  const clearEngineActions  = useViewerStore(s => s.clearEngineActions)
 
-  const selectedGlobalIds    = useSelectionStore(s => s.selectedGlobalIds)
-  const primaryGlobalId      = useSelectionStore(s => s.primaryGlobalId)
-  const selectObject         = useSelectionStore(s => s.selectObject)
-  const clearSelection       = useSelectionStore(s => s.clearSelection)
+  const selectedGlobalIds  = useSelectionStore(s => s.selectedGlobalIds)
+  const primaryGlobalId    = useSelectionStore(s => s.primaryGlobalId)
+  const selectObject       = useSelectionStore(s => s.selectObject)
+  const clearSelection     = useSelectionStore(s => s.clearSelection)
 
-  const computeAllFrames     = useSimulationStore(s => s.computeAllFrames)
-  const progress             = useSimulationStore(s => s.progress)
-  const isSimulationActive   = useSimulationStore(s => s.isSimulationActive)
-  const activities           = useActivityStore(s => s.activities)
-  const addError             = useUIStore(s => s.addError)
+  const computeAllFrames   = useSimulationStore(s => s.computeAllFrames)
+  const progress           = useSimulationStore(s => s.progress)
+  const isSimulationActive = useSimulationStore(s => s.isSimulationActive)
+  const activities         = useActivityStore(s => s.activities)
+  const addError           = useUIStore(s => s.addError)
+
+  const activeFilterIds    = useLayerStore(s => s.activeFilterIds)
+
+  // ── Phase 3: Bootstrap DB data ───────────────────────────
+  useAllAssignments()
+  useGlobalIdLayerMap()
 
   // ── Init ViewerEngine once ───────────────────────────────
   useEffect(() => {
@@ -6650,6 +6842,18 @@ export default function IFCViewer() {
 
       onSceneReady: () => {
         setSceneReady(true)
+
+        // ── Register engine action callbacks into the store ──
+        // Done inside onSceneReady so the engine is fully booted
+        // before any component can call the callbacks.
+        setEngineActions(
+          (globalId: string) => {
+            engineRef.current?.zoomToObject(globalId).catch(console.warn)
+          },
+          (globalIds: string[]) => {
+            engineRef.current?.isolateObjects(globalIds).catch(console.warn)
+          }
+        )
       },
 
       onModelLoaded: (_count) => {
@@ -6676,16 +6880,13 @@ export default function IFCViewer() {
       engine.dispose()
       engineRef.current = null
       setSceneReady(false)
+      clearEngineActions()
       resetModel()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Unload 3D scene when state returns to idle ───────────
-  // The header "Load New Model" button calls store.resetModel()
-  // which sets modelLoadState → 'idle'. This effect detects that
-  // transition and immediately clears the Three.js scene so the
-  // previous model is not visible behind the upload zone.
   useEffect(() => {
     if (modelLoadState !== 'idle') return
     const engine = engineRef.current
@@ -6696,43 +6897,28 @@ export default function IFCViewer() {
   }, [modelLoadState])
 
   // ── Effect 1: Simulation color overlay ──────────────────
-  //
-  // Only runs when isSimulationActive is true.
-  // Applies construction status colors (future/active/completed)
-  // to all objects linked to activities, with selection on top.
-  //
-  // When simulation is deactivated (isSimulationActive → false),
-  // engine.resetColors() restores the original IFC materials for
-  // every object via model.resetColor().
-  //
   useEffect(() => {
     const engine = engineRef.current
     if (!engine || modelLoadState !== 'loaded') return
 
     if (!isSimulationActive) {
-      // Simulation off — restore original IFC materials for all objects.
-      // Selection highlights are managed in Effect 2.
       engine.resetColors()
       return
     }
 
-    // Simulation active — apply construction status colours.
     const frames    = computeAllFrames(activities)
     const overrides = new Map<string, string>()
 
     for (const obj of ifcObjects) {
       if (obj.globalId === primaryGlobalId) {
-        overrides.set(obj.globalId, '#FF8C00')        // primary selection
+        overrides.set(obj.globalId, '#FF8C00')
       } else if (selectedGlobalIds.has(obj.globalId)) {
-        overrides.set(obj.globalId, '#FFD700')        // multi-select
+        overrides.set(obj.globalId, '#FFD700')
       } else {
         const frame = frames.get(obj.globalId)
         if (frame) {
-          // Object has a simulation status — apply its colour
           overrides.set(obj.globalId, frame.color)
         }
-        // Objects not linked to any activity are left without an override
-        // so their original IFC material shows through.
       }
     }
 
@@ -6750,19 +6936,10 @@ export default function IFCViewer() {
   ])
 
   // ── Effect 2: Selection highlight (simulation OFF) ───────
-  //
-  // When simulation is off, only the selected object(s) receive
-  // a highlight colour. All other objects keep their original IFC
-  // materials completely untouched.
-  //
-  // When selection clears, engine.resetColors() restores the
-  // original IFC material for the previously highlighted object.
-  //
   useEffect(() => {
     const engine = engineRef.current
     if (!engine || modelLoadState !== 'loaded') return
 
-    // Effect 1 handles selection colours when simulation is active.
     if (isSimulationActive) return
 
     if (selectedGlobalIds.size === 0 && primaryGlobalId === null) return
@@ -6793,6 +6970,25 @@ export default function IFCViewer() {
     modelLoadState,
   ])
 
+  // ── Effect 3 (Phase 3): Layer filter visibility ──────────
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine || modelLoadState !== 'loaded' || ifcObjects.length === 0) return
+
+    if (activeFilterIds.length === 0) {
+      engine.restoreVisibility().catch(console.warn)
+      return
+    }
+
+    const result = FilterEngine.applyLayerFilter(ifcObjects, activeFilterIds)
+
+    Promise.all([
+      engine.hideObjects(result.hidden),
+      engine.showObjects(result.visible),
+    ]).catch(console.warn)
+
+  }, [activeFilterIds, ifcObjects, modelLoadState])
+
   // ── Stats counts ─────────────────────────────────────────
   const frames = computeAllFrames(activities)
   const counts = { completed: 0, active: 0, future: 0 }
@@ -6801,7 +6997,6 @@ export default function IFCViewer() {
     counts[status]++
   })
 
-  // ── Overlay logic ─────────────────────────────────────────
   const showInitializing   = !sceneReady && modelLoadState !== 'error'
   const showUploadZone     = sceneReady && modelLoadState === 'idle'
   const showLoadingOverlay = sceneReady && modelLoadState === 'loading'
@@ -6810,19 +7005,13 @@ export default function IFCViewer() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#070B0F' }}>
 
-      {/* Three.js / OBC canvas mounts here */}
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
-      {/* ── Initializing overlay — engine booting ── */}
       {showInitializing && (
         <div style={{
-          position:       'absolute',
-          inset:          0,
-          display:        'flex',
-          alignItems:     'center',
-          justifyContent: 'center',
-          background:     'rgba(7, 11, 15, 0.92)',
-          zIndex:         10,
+          position: 'absolute', inset: 0, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(7, 11, 15, 0.92)', zIndex: 10,
         }}>
           <div className="upload-zone upload-zone--loading">
             <div className="upload-spinner" />
@@ -6832,31 +7021,21 @@ export default function IFCViewer() {
         </div>
       )}
 
-      {/* ── Upload zone — ready and waiting for a file ── */}
       {showUploadZone && (
         <div style={{
-          position:       'absolute',
-          inset:          0,
-          display:        'flex',
-          alignItems:     'center',
-          justifyContent: 'center',
-          background:     'rgba(7, 11, 15, 0.92)',
-          zIndex:         10,
+          position: 'absolute', inset: 0, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(7, 11, 15, 0.92)', zIndex: 10,
         }}>
           <IFCUploadZone viewerEngine={engineRef.current} />
         </div>
       )}
 
-      {/* ── Parsing overlay — IFC being processed ── */}
       {showLoadingOverlay && (
         <div style={{
-          position:       'absolute',
-          inset:          0,
-          display:        'flex',
-          alignItems:     'center',
-          justifyContent: 'center',
-          background:     'rgba(7, 11, 15, 0.92)',
-          zIndex:         10,
+          position: 'absolute', inset: 0, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(7, 11, 15, 0.92)', zIndex: 10,
         }}>
           <div className="upload-zone upload-zone--loading">
             <div className="upload-spinner" />
@@ -6868,22 +7047,16 @@ export default function IFCViewer() {
         </div>
       )}
 
-      {/* ── Error overlay — something went wrong ── */}
       {showErrorOverlay && (
         <div style={{
-          position:       'absolute',
-          inset:          0,
-          display:        'flex',
-          alignItems:     'center',
-          justifyContent: 'center',
-          background:     'rgba(7, 11, 15, 0.92)',
-          zIndex:         10,
+          position: 'absolute', inset: 0, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(7, 11, 15, 0.92)', zIndex: 10,
         }}>
           <IFCUploadZone viewerEngine={engineRef.current} />
         </div>
       )}
 
-      {/* ── Stats overlay — model loaded ── */}
       {modelLoadState === 'loaded' && (
         <>
           <div className="viewer-stats">
@@ -6893,21 +7066,15 @@ export default function IFCViewer() {
             </div>
             <div className="viewer-stats__row">
               <span>Completed</span>
-              <span className="viewer-stats__val" style={{ color: '#2ECC71' }}>
-                {counts.completed}
-              </span>
+              <span className="viewer-stats__val" style={{ color: '#2ECC71' }}>{counts.completed}</span>
             </div>
             <div className="viewer-stats__row">
               <span>Active</span>
-              <span className="viewer-stats__val" style={{ color: '#2F6BFF' }}>
-                {counts.active}
-              </span>
+              <span className="viewer-stats__val" style={{ color: '#2F6BFF' }}>{counts.active}</span>
             </div>
             <div className="viewer-stats__row">
               <span>Upcoming</span>
-              <span className="viewer-stats__val" style={{ color: '#B0B0B0' }}>
-                {counts.future}
-              </span>
+              <span className="viewer-stats__val" style={{ color: '#B0B0B0' }}>{counts.future}</span>
             </div>
           </div>
 
@@ -6917,27 +7084,14 @@ export default function IFCViewer() {
             </div>
             {isSimulationActive ? (
               <>
-                <div className="legend-item">
-                  <div className="legend-swatch" style={{ background: '#2ECC71' }} />
-                  Completed
-                </div>
-                <div className="legend-item">
-                  <div className="legend-swatch" style={{ background: '#2F6BFF' }} />
-                  Active / In-Progress
-                </div>
-                <div className="legend-item">
-                  <div className="legend-swatch" style={{ background: '#B0B0B0' }} />
-                  Upcoming
-                </div>
-                <div className="legend-item">
-                  <div className="legend-swatch" style={{ background: '#FFD700' }} />
-                  Selected
-                </div>
+                <div className="legend-item"><div className="legend-swatch" style={{ background: '#2ECC71' }} />Completed</div>
+                <div className="legend-item"><div className="legend-swatch" style={{ background: '#2F6BFF' }} />Active / In-Progress</div>
+                <div className="legend-item"><div className="legend-swatch" style={{ background: '#B0B0B0' }} />Upcoming</div>
+                <div className="legend-item"><div className="legend-swatch" style={{ background: '#FFD700' }} />Selected</div>
               </>
             ) : (
               <div className="legend-item" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                Original IFC colors active.<br />
-                Start simulation to see construction status.
+                Original IFC colors active.<br />Start simulation to see construction status.
               </div>
             )}
           </div>
@@ -6949,20 +7103,550 @@ export default function IFCViewer() {
 
 
 ====================================================================================================
+FILE: src\components\layers\LayerAssignmentPanel.tsx
+====================================================================================================
+
+import { useSelectionStore } from '../../store/selection.store'
+import { useViewerStore }    from '../../store/viewer.store'
+import { useLayerStore }     from '../../store/layer.store'
+import {
+  useAssignmentsByGlobalId,
+  useAssignLayer,
+  useRemoveObjectFromLayer,
+}                            from '../../hooks/useAssignments'
+
+export default function LayerAssignmentPanel() {
+  const primaryGlobalId     = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds   = useSelectionStore(s => s.selectedGlobalIds)
+  const getObjectByGlobalId = useViewerStore(s => s.getObjectByGlobalId)
+  const layers              = useLayerStore(s => s.layers)
+
+  const assignMutation = useAssignLayer()
+  const removeMutation = useRemoveObjectFromLayer()
+
+  const {
+    data:      assignments = [],
+    isLoading: loadingAssignments,
+  } = useAssignmentsByGlobalId(primaryGlobalId ?? '')
+
+  // ── No selection ──────────────────────────────────────────
+
+  if (!primaryGlobalId) {
+    return (
+      <div className="assign-panel">
+        <div className="assign-panel__scroll">
+          <div className="assign-empty">
+            Select elements in the 3D viewer<br />to assign information layers.
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const primaryObject    = getObjectByGlobalId(primaryGlobalId)
+  const selectionCount   = selectedGlobalIds.size
+  const assignedLayerIds = new Set(assignments.map(a => a.layerId))
+
+  // ── Handlers ──────────────────────────────────────────────
+
+  const handleAssign = (layerId: string) => {
+    const globalIds = Array.from(selectedGlobalIds)
+    assignMutation.mutate({ layerId, globalIds })
+  }
+
+  const handleRemove = (layerId: string) => {
+    removeMutation.mutate({ layerId, globalId: primaryGlobalId })
+  }
+
+  // ── Render ─────────────────────────────────────────────────
+
+  return (
+    <div className="assign-panel">
+
+      {/* ── STICKY: selected element identity ────────────────
+          flex-shrink:0 keeps it visible regardless of how many
+          layers are in the scroll zone below.                  */}
+      <div className="assign-panel__header">
+        <div className="assign-panel__primary">
+          <span className="assign-panel__name" title={primaryGlobalId}>
+            {primaryObject?.name ?? primaryGlobalId}
+          </span>
+          <span className="assign-panel__type">
+            {primaryObject?.type ?? 'IFC Object'}
+          </span>
+        </div>
+        {selectionCount > 1 && (
+          <div className="assign-panel__multi">
+            +{selectionCount - 1} more selected
+            <span className="assign-panel__multi-hint">
+              (assignments apply to all)
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ── SCROLL ZONE ──────────────────────────────────────
+          All list content here. flex:1 + overflow-y:auto
+          means it takes remaining height and scrolls when the
+          layer list is longer than the available space.        */}
+      <div className="assign-panel__scroll">
+
+        {/* Loading */}
+        {loadingAssignments && (
+          <div className="assign-loading">
+            <div className="upload-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
+            <span>Loading assignments…</span>
+          </div>
+        )}
+
+        {/* Layer rows */}
+        {!loadingAssignments && (
+          <div className="assign-layer-list">
+            {layers.length === 0 ? (
+              <div className="assign-empty">
+                No layers available.<br />Create layers in the section above first.
+              </div>
+            ) : (
+              layers.map(layer => {
+                const isAssigned = assignedLayerIds.has(layer.id)
+
+                return (
+                  <div
+                    key={layer.id}
+                    className={`assign-layer-row${isAssigned ? ' assign-layer-row--assigned' : ''}`}
+                  >
+                    <span
+                      className="assign-layer-swatch"
+                      style={{ background: layer.color }}
+                    />
+                    <span className="assign-layer-name">{layer.name}</span>
+
+                    {isAssigned ? (
+                      <button
+                        className="assign-btn assign-btn--remove"
+                        onClick={() => handleRemove(layer.id)}
+                        disabled={removeMutation.isPending}
+                        title="Remove from layer"
+                      >
+                        ✕ Remove
+                      </button>
+                    ) : (
+                      <button
+                        className="assign-btn assign-btn--add"
+                        onClick={() => handleAssign(layer.id)}
+                        disabled={assignMutation.isPending}
+                        title={
+                          selectionCount > 1
+                            ? `Assign ${selectionCount} selected objects to this layer`
+                            : 'Assign to this layer'
+                        }
+                      >
+                        + Assign
+                      </button>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        )}
+
+        {/* Mutation errors — in scroll zone so they don't push sticky content */}
+        {assignMutation.isError && (
+          <div className="assign-error">
+            Assign failed: {(assignMutation.error as Error).message}
+          </div>
+        )}
+        {removeMutation.isError && (
+          <div className="assign-error">
+            Remove failed: {(removeMutation.error as Error).message}
+          </div>
+        )}
+
+      </div>
+      {/* ── end SCROLL ZONE ─────────────────────────────────── */}
+
+    </div>
+  )
+}
+
+
+====================================================================================================
+FILE: src\components\layers\LayerFilterBar.tsx
+====================================================================================================
+
+import { useLayerStore } from '../../store/layer.store'
+
+export default function LayerFilterBar() {
+  const activeFilterIds = useLayerStore(s => s.activeFilterIds)
+  const layers          = useLayerStore(s => s.layers)
+  const toggleFilter    = useLayerStore(s => s.toggleFilter)
+  const clearFilters    = useLayerStore(s => s.clearFilters)
+
+  if (activeFilterIds.length === 0) return null
+
+  const activeLayerObjs = activeFilterIds
+    .map(id => layers.find(l => l.id === id))
+    .filter(Boolean) as { id: string; name: string; color: string }[]
+
+  return (
+    <div className="layer-filter-bar">
+      <span className="layer-filter-bar__label">Filtered by:</span>
+
+      {activeLayerObjs.map(layer => (
+        <span key={layer.id} className="layer-chip">
+          <span className="layer-chip__dot" style={{ background: layer.color }} />
+          <span className="layer-chip__name">{layer.name}</span>
+          <button
+            className="layer-chip__remove"
+            onClick={() => toggleFilter(layer.id)}
+            aria-label={`Remove ${layer.name} filter`}
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+
+      <button
+        className="layer-filter-bar__clear"
+        onClick={clearFilters}
+      >
+        Clear all
+      </button>
+    </div>
+  )
+}
+
+
+====================================================================================================
+FILE: src\components\layers\LayerPanel.tsx
+====================================================================================================
+
+import { useState, useCallback, useRef } from 'react'
+import { useLayerStore }                 from '../../store/layer.store'
+import {
+  useLayers,
+  useLayerCounts,
+  useCreateLayer,
+  useRenameLayer,
+  useDeleteLayer,
+}                                        from '../../hooks/useLayers'
+import { LAYER_CATEGORY_META }           from '../../types'
+import type { LayerCategory }            from '../../types'
+
+// ── Default color palette ──────────────────────────────────────────────────────
+
+const PALETTE = [
+  '#3498DB', '#2ECC71', '#E74C3C', '#F39C12', '#9B59B6',
+  '#1ABC9C', '#E67E22', '#E91E63', '#00BCD4', '#8BC34A',
+]
+
+function randomColor(): string {
+  return PALETTE[Math.floor(Math.random() * PALETTE.length)]
+}
+
+// ── LayerRow ──────────────────────────────────────────────────────────────────
+
+interface LayerRowProps {
+  id:       string
+  name:     string
+  color:    string
+  category: string
+  count:    number
+  isActive: boolean
+  onToggle: (id: string) => void
+  onDelete: (id: string) => void
+  onRename: (id: string, name: string) => void
+}
+
+function LayerRow({
+  id, name, color, category, count, isActive,
+  onToggle, onDelete, onRename,
+}: LayerRowProps) {
+  const [editing,  setEditing]  = useState(false)
+  const [editName, setEditName] = useState(name)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const meta = LAYER_CATEGORY_META.find(m => m.value === category)
+
+  const startEdit = () => {
+    setEditName(name)
+    setEditing(true)
+    setTimeout(() => inputRef.current?.select(), 0)
+  }
+
+  const commitEdit = () => {
+    const trimmed = editName.trim()
+    if (trimmed && trimmed !== name) onRename(id, trimmed)
+    setEditing(false)
+  }
+
+  const cancelEdit = () => {
+    setEditName(name)
+    setEditing(false)
+  }
+
+  return (
+    <div className={`layer-row${isActive ? ' layer-row--active' : ''}`}>
+      <button
+        className="layer-swatch"
+        style={{ background: color }}
+        title={isActive ? 'Remove from filter' : 'Filter by this layer'}
+        onClick={() => onToggle(id)}
+        aria-pressed={isActive}
+      />
+
+      <div className="layer-row__body" onDoubleClick={startEdit}>
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="layer-row__input"
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={e => {
+              if (e.key === 'Enter')  commitEdit()
+              if (e.key === 'Escape') cancelEdit()
+            }}
+          />
+        ) : (
+          <span className="layer-row__name" title="Double-click to rename">{name}</span>
+        )}
+        <span className="layer-row__meta">
+          {meta?.icon ?? '🏷️'} {meta?.label ?? category}
+        </span>
+      </div>
+
+      <span
+        className="layer-count-badge"
+        title={`${count} assigned element${count !== 1 ? 's' : ''}`}
+      >
+        {count}
+      </span>
+
+      <button
+        className="layer-delete-btn"
+        title="Delete layer"
+        onClick={() => onDelete(id)}
+        aria-label={`Delete layer ${name}`}
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
+// ── CreateForm ────────────────────────────────────────────────────────────────
+
+interface CreateFormProps {
+  onSubmit:  (name: string, category: LayerCategory, color: string) => void
+  isLoading: boolean
+}
+
+function CreateForm({ onSubmit, isLoading }: CreateFormProps) {
+  const [name,     setName]     = useState('')
+  const [category, setCategory] = useState<LayerCategory>('custom')
+  const [color,    setColor]    = useState(randomColor)
+
+  const handleSubmit = () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    onSubmit(trimmed, category, color)
+    setName('')
+    setColor(randomColor())
+  }
+
+  return (
+    <div className="layer-create-form">
+      <div className="layer-create-form__row">
+        <input
+          className="layer-create-form__name"
+          type="text"
+          placeholder="Layer name…"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          maxLength={80}
+        />
+        <input
+          type="color"
+          className="layer-create-form__color"
+          value={color}
+          onChange={e => setColor(e.target.value)}
+          title="Choose color"
+        />
+      </div>
+      <div className="layer-create-form__row">
+        <select
+          className="layer-create-form__category"
+          value={category}
+          onChange={e => setCategory(e.target.value as LayerCategory)}
+        >
+          {LAYER_CATEGORY_META.map(m => (
+            <option key={m.value} value={m.value}>
+              {m.icon} {m.label}
+            </option>
+          ))}
+        </select>
+        <button
+          className="layer-create-form__btn"
+          onClick={handleSubmit}
+          disabled={isLoading || !name.trim()}
+        >
+          {isLoading ? '…' : '+ Add Layer'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── LayerPanel ─────────────────────────────────────────────────────────────────
+
+export default function LayerPanel() {
+  const { data: layers, isLoading, isError, error } = useLayers()
+  const { data: counts = new Map<string, number>() }  = useLayerCounts()
+  const createMutation = useCreateLayer()
+  const renameMutation = useRenameLayer()
+  const deleteMutation = useDeleteLayer()
+
+  const activeFilterIds = useLayerStore(s => s.activeFilterIds)
+  const toggleFilter    = useLayerStore(s => s.toggleFilter)
+  const clearFilters    = useLayerStore(s => s.clearFilters)
+
+  const handleCreate = useCallback((
+    name: string, category: LayerCategory, color: string,
+  ) => {
+    createMutation.mutate({ payload: { name, category, color, description: null } })
+  }, [createMutation])
+
+  const handleRename = useCallback((id: string, newName: string) => {
+    renameMutation.mutate({ id, newName })
+  }, [renameMutation])
+
+  const handleDelete = useCallback((id: string) => {
+    deleteMutation.mutate(id)
+  }, [deleteMutation])
+
+  return (
+    <div className="layer-panel">
+
+      {/* ── STICKY ZONE — always visible ────────────────────────
+          Title bar + create form live here.
+          .layer-panel__sticky has flex-shrink:0 so it never
+          collapses or gets pushed off-screen.                  */}
+      <div className="layer-panel__sticky">
+
+        {/* Title + optional filter-clear button */}
+        <div className="layer-panel__header">
+          <span className="layer-panel__title">Information Layers</span>
+          {activeFilterIds.length > 0 && (
+            <button
+              className="layer-panel__clear-btn"
+              onClick={clearFilters}
+              title="Clear all layer filters"
+            >
+              Clear Filters ({activeFilterIds.length})
+            </button>
+          )}
+        </div>
+
+        {/* Create form */}
+        <CreateForm
+          onSubmit={handleCreate}
+          isLoading={createMutation.isPending}
+        />
+
+        {/* Create-mutation error (shown in sticky zone so it's always visible) */}
+        {createMutation.isError && (
+          <div className="layer-error">
+            Failed to create layer: {(createMutation.error as Error).message}
+          </div>
+        )}
+
+      </div>
+      {/* ── end STICKY ZONE ─────────────────────────────────── */}
+
+      {/* ── SCROLL ZONE — independently scrollable ──────────────
+          Everything below the sticky header lives here.
+          .layer-panel__scroll has flex:1, min-height:0,
+          overflow-y:auto so it takes all remaining height and
+          scrolls without affecting anything outside.           */}
+      <div className="layer-panel__scroll">
+
+        {/* Loading state */}
+        {isLoading && (
+          <div className="layer-loading">
+            <div className="upload-spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
+            <span>Loading layers…</span>
+          </div>
+        )}
+
+        {/* Fetch error */}
+        {isError && (
+          <div className="layer-error">
+            {(error as Error).message}
+          </div>
+        )}
+
+        {/* Layer list */}
+        {!isLoading && !isError && (
+          <div className="layer-list">
+            {(layers ?? []).length === 0 ? (
+              <div className="layer-empty">
+                No layers yet.<br />Create one using the form above.
+              </div>
+            ) : (
+              (layers ?? []).map(layer => (
+                <LayerRow
+                  key={layer.id}
+                  id={layer.id}
+                  name={layer.name}
+                  color={layer.color}
+                  category={layer.category}
+                  count={counts.get(layer.id) ?? 0}
+                  isActive={activeFilterIds.includes(layer.id)}
+                  onToggle={toggleFilter}
+                  onDelete={handleDelete}
+                  onRename={handleRename}
+                />
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Active-filter indicator — shown at bottom of scroll area */}
+        {activeFilterIds.length > 0 && (
+          <div className="layer-filter-indicator">
+            🔍 Filtering by {activeFilterIds.length} layer{activeFilterIds.length !== 1 ? 's' : ''}
+          </div>
+        )}
+
+      </div>
+      {/* ── end SCROLL ZONE ─────────────────────────────────── */}
+
+    </div>
+  )
+}
+
+
+====================================================================================================
 FILE: src\components\Layout.tsx
 ====================================================================================================
 
-import { useState } from 'react'
-import { ErrorBoundary } from '../app/providers/ErrorBoundary'
-import IFCViewer from './IFCViewer'
-import GanttPanel from './GanttPanel'
-import TimelineSlider from './TimelineSlider'
-import IFCInspector from './IFCInspector'
-import IFCObjectTree from './IFCObjectTree'
-import { useViewerStore } from '../store/viewer.store'
-import { IFCUploadService } from '../services/ifc/IFCUploadService'
+import { useState }              from 'react'
+import { ErrorBoundary }         from '../app/providers/ErrorBoundary'
+import IFCViewer                 from './IFCViewer'
+import GanttPanel                from './GanttPanel'
+import TimelineSlider            from './TimelineSlider'
+import IFCInspector              from './IFCInspector'
+import IFCObjectTree             from './IFCObjectTree'
+import LayerPanel                from './layers/LayerPanel'
+import LayerAssignmentPanel      from './layers/LayerAssignmentPanel'
+import LayerFilterBar            from './layers/LayerFilterBar'
+import { useViewerStore }        from '../store/viewer.store'
+import { IFCUploadService }      from '../services/ifc/IFCUploadService'
 
-type RightTab = 'inspector' | 'tree'
+type RightTab = 'inspector' | 'tree' | 'layers'
 
 export default function Layout() {
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
@@ -6975,6 +7659,7 @@ export default function Layout() {
 
   return (
     <div className="bim-layout">
+
       {/* ── HEADER ── */}
       <header className="bim-header">
         <div className="bim-header__logo">
@@ -7024,9 +7709,12 @@ export default function Layout() {
             <button className="panel-action-btn">Wireframe</button>
           </div>
         </div>
-        <div className="panel-body">
+        <div className="panel-body" style={{ flexDirection: 'column' }}>
           <ErrorBoundary context="3D Viewer">
             <IFCViewer />
+          </ErrorBoundary>
+          <ErrorBoundary context="Layer Filter Bar">
+            <LayerFilterBar />
           </ErrorBoundary>
         </div>
       </div>
@@ -7038,6 +7726,8 @@ export default function Layout() {
 
       {/* ── BOTTOM ROW ── */}
       <div className="bim-bottom">
+
+        {/* Left: Gantt */}
         <div className="panel" style={{ borderLeft: 'none' }}>
           <div className="panel-header">
             <span className="panel-header__label">Gantt Schedule</span>
@@ -7053,10 +7743,9 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Right panel — tabbed: IFC Inspector | Object Tree */}
+        {/* Right: Inspector | Object Tree | Layers */}
         <div className="panel" style={{ borderRight: 'none' }}>
           <div className="panel-header">
-            {/* Tab switcher embedded in header */}
             <div className="panel-tabs">
               <button
                 className={`panel-tab${rightTab === 'inspector' ? ' panel-tab--active' : ''}`}
@@ -7070,6 +7759,12 @@ export default function Layout() {
               >
                 Object Tree
               </button>
+              <button
+                className={`panel-tab${rightTab === 'layers' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('layers')}
+              >
+                Layers
+              </button>
             </div>
             <div className="panel-header__actions">
               {rightTab === 'inspector' && (
@@ -7077,18 +7772,47 @@ export default function Layout() {
               )}
             </div>
           </div>
-          <div className="panel-body">
+
+          <div className="panel-body" style={{ overflow: 'hidden' }}>
+
             {rightTab === 'inspector' ? (
               <ErrorBoundary context="IFC Inspector">
                 <IFCInspector />
               </ErrorBoundary>
-            ) : (
+
+            ) : rightTab === 'tree' ? (
               <ErrorBoundary context="IFC Object Tree">
                 <IFCObjectTree />
               </ErrorBoundary>
+
+            ) : (
+              /* ── Layers tab ───────────────────────────────────────────
+                 .layers-tab-root is a flex column that fills panel-body.
+                 Its two children (.layer-panel and .assign-section) share
+                 the height via flex:55 / flex:45, both with min-height:0
+                 so they can shrink and allow their own scroll zones to
+                 work correctly at any viewport height.                  */
+              <ErrorBoundary context="Layers Panel">
+                <div className="layers-tab-root">
+
+                  {/* Top section: layer management */}
+                  <LayerPanel />
+
+                  {/* Bottom section: assign selected objects to layers */}
+                  <div className="assign-section">
+                    <div className="assign-section__label">
+                      Assign to Selection
+                    </div>
+                    <LayerAssignmentPanel />
+                  </div>
+
+                </div>
+              </ErrorBoundary>
             )}
+
           </div>
         </div>
+
       </div>
     </div>
   )
@@ -7949,6 +8673,94 @@ export class SimulationEngine {
 
 
 ====================================================================================================
+FILE: src\database\client.ts
+====================================================================================================
+
+import { neon, type NeonQueryFunction } from '@neondatabase/serverless'
+
+// ── Connection string ────────────────────────────────────────────────────────
+
+function getDatabaseUrl(): string {
+  const url = import.meta.env.VITE_NEON_DATABASE_URL as string | undefined
+
+  if (!url || url.trim().length === 0) {
+    throw new Error(
+      '[database/client] VITE_NEON_DATABASE_URL is not set.\n' +
+      'Create a .env.local file with VITE_NEON_DATABASE_URL=<your neon connection string>.'
+    )
+  }
+
+  return url.trim()
+}
+
+// ── Lazy singleton ───────────────────────────────────────────────────────────
+
+let _sql: NeonQueryFunction<false, false> | null = null
+
+function getClient(): NeonQueryFunction<false, false> {
+  if (!_sql) {
+    _sql = neon(getDatabaseUrl())
+  }
+  return _sql
+}
+
+/**
+ * Tagged template literal SQL executor.
+ *
+ * @example
+ * const rows = await sql`SELECT * FROM information_layers`
+ * const rows = await sql`SELECT * FROM information_layers WHERE id = ${id}`
+ */
+export async function sql<T = Record<string, unknown>>(
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+): Promise<T[]> {
+  const client = getClient()
+  // neon() returns a tagged template function whose return type is
+  // Promise<QueryResult[]>. We cast to T[] for clean consumer types.
+  const result = await client(strings, ...values)
+  return result as unknown as T[]
+}
+
+/**
+ * Checks whether the database connection is healthy.
+ * Useful for a startup connectivity probe.
+ */
+export async function ping(): Promise<boolean> {
+  try {
+    await sql`SELECT 1`
+    return true
+  } catch {
+    return false
+  }
+}
+
+
+====================================================================================================
+FILE: src\database\types.ts
+====================================================================================================
+
+export interface LayerRow {
+  readonly id:          string
+  readonly name:        string
+  readonly category:    string
+  readonly color:       string
+  readonly description: string | null
+  readonly created_at:  string
+}
+
+/**
+ * Raw row from the `layer_assignments` table.
+ */
+export interface AssignmentRow {
+  readonly id:          string
+  readonly layer_id:    string
+  readonly global_id:   string
+  readonly assigned_at: string
+}
+
+
+====================================================================================================
 FILE: src\features\viewer\IFCUploadZone.tsx
 ====================================================================================================
 
@@ -8138,22 +8950,758 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
 
 
 ====================================================================================================
+FILE: src\hooks\useAssignments.ts
+====================================================================================================
+
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type UseQueryResult,
+  type UseMutationResult,
+} from '@tanstack/react-query'
+import { useEffect }     from 'react'
+import { useLayerStore } from '../store/layer.store'
+import { useViewerStore } from '../store/viewer.store'
+import {
+  fetchAllAssignments,
+  fetchAssignmentsByLayer,
+  fetchAssignmentsByGlobalId,
+  assignObjectsToLayer,
+  removeAssignment,
+  removeObjectFromLayer,
+  buildGlobalIdToLayerIdsMap,
+} from '../services/api/assignments.api'
+import { layerKeys } from './useLayers'
+import type { LayerAssignment } from '../types'
+
+// ── Query keys ────────────────────────────────────────────────────────────────
+
+export const assignmentKeys = {
+  all:          ['assignments']                                      as const,
+  byLayer:      (layerId: string)  => ['assignments', 'layer',  layerId] as const,
+  byGlobalId:   (globalId: string) => ['assignments', 'object', globalId] as const,
+  globalIdMap:  ['assignments', 'globalIdMap']                      as const,
+}
+
+// ── useAllAssignments ─────────────────────────────────────────────────────────
+
+/**
+ * Fetches ALL assignments and syncs them into the layer store.
+ * Called once on app startup after model load.
+ */
+export function useAllAssignments(): UseQueryResult<LayerAssignment[]> {
+  const setAssignments = useLayerStore(s => s.setAssignments)
+
+  const query = useQuery<LayerAssignment[]>({
+    queryKey: assignmentKeys.all,
+    queryFn:  fetchAllAssignments,
+  })
+
+  useEffect(() => {
+    if (query.data) {
+      setAssignments(query.data)
+    }
+  }, [query.data, setAssignments])
+
+  return query
+}
+
+// ── useAssignmentsByLayer ─────────────────────────────────────────────────────
+
+/**
+ * Fetches all assignments for a specific layer.
+ */
+export function useAssignmentsByLayer(
+  layerId: string
+): UseQueryResult<LayerAssignment[]> {
+  return useQuery<LayerAssignment[]>({
+    queryKey: assignmentKeys.byLayer(layerId),
+    queryFn:  () => fetchAssignmentsByLayer(layerId),
+    enabled:  layerId.length > 0,
+  })
+}
+
+// ── useAssignmentsByGlobalId ──────────────────────────────────────────────────
+
+/**
+ * Fetches all layer assignments for a specific IFC object.
+ */
+export function useAssignmentsByGlobalId(
+  globalId: string
+): UseQueryResult<LayerAssignment[]> {
+  return useQuery<LayerAssignment[]>({
+    queryKey: assignmentKeys.byGlobalId(globalId),
+    queryFn:  () => fetchAssignmentsByGlobalId(globalId),
+    enabled:  globalId.length > 0,
+  })
+}
+
+// ── useGlobalIdLayerMap ────────────────────────────────────────────────────────
+
+/**
+ * Fetches the full globalId → layerIds[] map and syncs IFCObject.layerIds
+ * in the viewer store so the FilterEngine can filter by layer.
+ *
+ * This is the primary bridge between DB assignments and the FilterEngine.
+ */
+export function useGlobalIdLayerMap(): UseQueryResult<Map<string, string[]>> {
+  const setIFCObjects = useViewerStore(s => s.setIFCObjects)
+  const ifcObjects    = useViewerStore(s => s.ifcObjects)
+
+  const query = useQuery<Map<string, string[]>>({
+    queryKey: assignmentKeys.globalIdMap,
+    queryFn:  buildGlobalIdToLayerIdsMap,
+    // Disable until objects are loaded
+    enabled:  ifcObjects.length > 0,
+  })
+
+  // Patch IFCObject.layerIds whenever the map refreshes
+  useEffect(() => {
+    if (!query.data || ifcObjects.length === 0) return
+
+    const map = query.data
+    const patched = ifcObjects.map(obj => ({
+      ...obj,
+      layerIds: map.get(obj.globalId) ?? [],
+    }))
+
+    setIFCObjects(patched)
+  }, [query.data, ifcObjects.length, setIFCObjects]) // intentionally omit `ifcObjects` ref
+
+  return query
+}
+
+// ── useAssignLayer ────────────────────────────────────────────────────────────
+
+interface AssignLayerVariables {
+  layerId:   string
+  globalIds: string[]
+}
+
+/**
+ * Mutation hook for assigning one or more IFC objects to a layer.
+ */
+export function useAssignLayer(): UseMutationResult<
+  LayerAssignment[],
+  Error,
+  AssignLayerVariables
+> {
+  const queryClient = useQueryClient()
+
+  return useMutation<LayerAssignment[], Error, AssignLayerVariables>({
+    mutationFn: ({ layerId, globalIds }) =>
+      assignObjectsToLayer(layerId, globalIds),
+
+    onSuccess: (_newAssignments, { layerId }) => {
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.all })
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.byLayer(layerId) })
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.globalIdMap })
+      void queryClient.invalidateQueries({ queryKey: layerKeys.counts })
+    },
+  })
+}
+
+// ── useRemoveAssignment ────────────────────────────────────────────────────────
+
+/**
+ * Mutation hook for removing a single assignment by its UUID.
+ */
+export function useRemoveAssignment(): UseMutationResult<boolean, Error, string> {
+  const queryClient = useQueryClient()
+
+  return useMutation<boolean, Error, string>({
+    mutationFn: (id) => removeAssignment(id),
+
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.all })
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.globalIdMap })
+      void queryClient.invalidateQueries({ queryKey: layerKeys.counts })
+    },
+  })
+}
+
+// ── useRemoveObjectFromLayer ──────────────────────────────────────────────────
+
+interface RemoveObjectVariables {
+  layerId:  string
+  globalId: string
+}
+
+/**
+ * Mutation hook for removing a specific IFC object from a layer.
+ */
+export function useRemoveObjectFromLayer(): UseMutationResult<
+  number,
+  Error,
+  RemoveObjectVariables
+> {
+  const queryClient = useQueryClient()
+
+  return useMutation<number, Error, RemoveObjectVariables>({
+    mutationFn: ({ layerId, globalId }) =>
+      removeObjectFromLayer(layerId, globalId),
+
+    onSuccess: (_count, { layerId }) => {
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.all })
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.byLayer(layerId) })
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.globalIdMap })
+      void queryClient.invalidateQueries({ queryKey: layerKeys.counts })
+    },
+  })
+}
+
+
+====================================================================================================
+FILE: src\hooks\useLayers.ts
+====================================================================================================
+
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type UseQueryResult,
+  type UseMutationResult,
+} from '@tanstack/react-query'
+import { useEffect }     from 'react'
+import { useLayerStore } from '../store/layer.store'
+import {
+  fetchLayers,
+  createLayer,
+  renameLayer,
+  updateLayerColor,
+  deleteLayer,
+  fetchLayerCounts,
+} from '../services/api/layers.api'
+import type {
+  InformationLayer,
+  CreateLayerPayload,
+} from '../types'
+
+// ── Query keys ────────────────────────────────────────────────────────────────
+
+export const layerKeys = {
+  all:    ['layers']                     as const,
+  counts: ['layers', 'counts']           as const,
+  detail: (id: string) => ['layers', id] as const,
+}
+
+// ── useLayers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches all information layers and syncs them into the layer store.
+ */
+export function useLayers(): UseQueryResult<InformationLayer[]> {
+  const setLayers = useLayerStore(s => s.setLayers)
+
+  const query = useQuery<InformationLayer[]>({
+    queryKey: layerKeys.all,
+    queryFn:  fetchLayers,
+  })
+
+  // Sync into Zustand on every successful fetch so FilterEngine
+  // continues to work via layer.store.layers.
+  useEffect(() => {
+    if (query.data) {
+      setLayers(query.data)
+    }
+  }, [query.data, setLayers])
+
+  return query
+}
+
+// ── useLayerCounts ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetches assignment counts per layer.
+ * Returns a Map<layerId, count>.
+ */
+export function useLayerCounts(): UseQueryResult<Map<string, number>> {
+  return useQuery<Map<string, number>>({
+    queryKey: layerKeys.counts,
+    queryFn:  fetchLayerCounts,
+  })
+}
+
+// ── useCreateLayer ────────────────────────────────────────────────────────────
+
+interface CreateLayerVariables {
+  payload: CreateLayerPayload
+}
+
+/**
+ * Mutation hook for creating a new information layer.
+ * Invalidates the layers list on success.
+ */
+export function useCreateLayer(): UseMutationResult<
+  InformationLayer,
+  Error,
+  CreateLayerVariables
+> {
+  const queryClient = useQueryClient()
+
+  return useMutation<InformationLayer, Error, CreateLayerVariables>({
+    mutationFn: ({ payload }) => createLayer(payload),
+
+    onSuccess: (newLayer) => {
+      // Optimistically prepend to cache
+      queryClient.setQueryData<InformationLayer[]>(
+        layerKeys.all,
+        (old = []) => [newLayer, ...old]
+      )
+      // Invalidate counts
+      void queryClient.invalidateQueries({ queryKey: layerKeys.counts })
+    },
+  })
+}
+
+// ── useRenameLayer ────────────────────────────────────────────────────────────
+
+interface RenameLayerVariables {
+  id:      string
+  newName: string
+}
+
+/**
+ * Mutation hook for renaming a layer.
+ * Optimistically updates the cache.
+ */
+export function useRenameLayer(): UseMutationResult<
+  InformationLayer | null,
+  Error,
+  RenameLayerVariables
+> {
+  const queryClient = useQueryClient()
+
+  return useMutation<InformationLayer | null, Error, RenameLayerVariables>({
+    mutationFn: ({ id, newName }) => renameLayer(id, newName),
+
+    onMutate: async ({ id, newName }) => {
+      await queryClient.cancelQueries({ queryKey: layerKeys.all })
+      const previous = queryClient.getQueryData<InformationLayer[]>(layerKeys.all)
+
+      queryClient.setQueryData<InformationLayer[]>(
+        layerKeys.all,
+        (old = []) => old.map(l => l.id === id ? { ...l, name: newName } : l)
+      )
+
+      return { previous }
+    },
+
+    onError: (_err, _vars, context) => {
+      const ctx = context as { previous?: InformationLayer[] } | undefined
+      if (ctx?.previous) {
+        queryClient.setQueryData(layerKeys.all, ctx.previous)
+      }
+    },
+
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: layerKeys.all })
+    },
+  })
+}
+
+// ── useUpdateLayerColor ───────────────────────────────────────────────────────
+
+interface UpdateColorVariables {
+  id:    string
+  color: string
+}
+
+/**
+ * Mutation hook for updating a layer's display color.
+ */
+export function useUpdateLayerColor(): UseMutationResult<
+  InformationLayer | null,
+  Error,
+  UpdateColorVariables
+> {
+  const queryClient = useQueryClient()
+
+  return useMutation<InformationLayer | null, Error, UpdateColorVariables>({
+    mutationFn: ({ id, color }) => updateLayerColor(id, color),
+
+    onMutate: async ({ id, color }) => {
+      await queryClient.cancelQueries({ queryKey: layerKeys.all })
+      const previous = queryClient.getQueryData<InformationLayer[]>(layerKeys.all)
+
+      queryClient.setQueryData<InformationLayer[]>(
+        layerKeys.all,
+        (old = []) => old.map(l => l.id === id ? { ...l, color } : l)
+      )
+
+      return { previous }
+    },
+
+    onError: (_err, _vars, context) => {
+      const ctx = context as { previous?: InformationLayer[] } | undefined
+      if (ctx?.previous) {
+        queryClient.setQueryData(layerKeys.all, ctx.previous)
+      }
+    },
+
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: layerKeys.all })
+    },
+  })
+}
+
+// ── useDeleteLayer ────────────────────────────────────────────────────────────
+
+/**
+ * Mutation hook for deleting a layer.
+ * Optimistically removes it from the cache.
+ * The database CASCADE handles associated assignments.
+ */
+export function useDeleteLayer(): UseMutationResult<boolean, Error, string> {
+  const queryClient = useQueryClient()
+  const clearFilter = useLayerStore(s => s.clearFilters)
+
+  return useMutation<boolean, Error, string>({
+    mutationFn: (id) => deleteLayer(id),
+
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: layerKeys.all })
+      const previous = queryClient.getQueryData<InformationLayer[]>(layerKeys.all)
+
+      queryClient.setQueryData<InformationLayer[]>(
+        layerKeys.all,
+        (old = []) => old.filter(l => l.id !== id)
+      )
+
+      return { previous }
+    },
+
+    onSuccess: () => {
+      // Clear any active filter referencing the deleted layer
+      clearFilter()
+      void queryClient.invalidateQueries({ queryKey: layerKeys.counts })
+    },
+
+    onError: (_err, _vars, context) => {
+      const ctx = context as { previous?: InformationLayer[] } | undefined
+      if (ctx?.previous) {
+        queryClient.setQueryData(layerKeys.all, ctx.previous)
+      }
+    },
+
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: layerKeys.all })
+    },
+  })
+}
+
+
+====================================================================================================
 FILE: src\main.tsx
 ====================================================================================================
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { ErrorBoundary } from './app/providers/ErrorBoundary'
+import QueryProvider from './app/providers/QueryProvider'
 import Layout from './components/Layout'
 import './App.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ErrorBoundary context="Application Root">
-      <Layout />
-    </ErrorBoundary>
+    <QueryProvider>
+      <ErrorBoundary context="Application Root">
+        <Layout />
+      </ErrorBoundary>
+    </QueryProvider>
   </React.StrictMode>
 )
+
+
+====================================================================================================
+FILE: src\services\api\assignments.api.ts
+====================================================================================================
+
+import { sql }                  from '../../database/client'
+import type { AssignmentRow }   from '../../database/types'
+import type { LayerAssignment } from '../../types'
+
+// ── Row → Domain mapper ──────────────────────────────────────────────────────
+
+function rowToAssignment(row: AssignmentRow): LayerAssignment {
+  return {
+    id:         row.id,
+    layerId:    row.layer_id,
+    globalId:   row.global_id,
+    assignedAt: row.assigned_at,
+  }
+}
+
+// ── API methods ──────────────────────────────────────────────────────────────
+
+/**
+ * Fetches ALL assignments.
+ * Used to seed the layer store after model load.
+ */
+export async function fetchAllAssignments(): Promise<LayerAssignment[]> {
+  const rows = await sql<AssignmentRow>`
+    SELECT id, layer_id, global_id, assigned_at
+    FROM   layer_assignments
+    ORDER  BY assigned_at DESC
+  `
+  return rows.map(rowToAssignment)
+}
+
+/**
+ * Fetches all assignments for a specific layer.
+ */
+export async function fetchAssignmentsByLayer(
+  layerId: string
+): Promise<LayerAssignment[]> {
+  const rows = await sql<AssignmentRow>`
+    SELECT id, layer_id, global_id, assigned_at
+    FROM   layer_assignments
+    WHERE  layer_id = ${layerId}
+    ORDER  BY assigned_at DESC
+  `
+  return rows.map(rowToAssignment)
+}
+
+/**
+ * Fetches all layers assigned to a specific IFC object.
+ */
+export async function fetchAssignmentsByGlobalId(
+  globalId: string
+): Promise<LayerAssignment[]> {
+  const rows = await sql<AssignmentRow>`
+    SELECT id, layer_id, global_id, assigned_at
+    FROM   layer_assignments
+    WHERE  global_id = ${globalId}
+    ORDER  BY assigned_at DESC
+  `
+  return rows.map(rowToAssignment)
+}
+
+/**
+ * Assigns one or more IFC GlobalIds to a layer.
+ *
+ * Uses INSERT … ON CONFLICT DO NOTHING so repeated calls are safe.
+ * Returns only the newly inserted assignments.
+ */
+export async function assignObjectsToLayer(
+  layerId:   string,
+  globalIds: string[]
+): Promise<LayerAssignment[]> {
+  if (globalIds.length === 0) return []
+
+  // Build a VALUES list: ($1, $2), ($1, $3), …
+  // We use a single parameterised query via Neon's tagged template.
+  // Neon supports array parameters via unnest.
+  const rows = await sql<AssignmentRow>`
+    INSERT INTO layer_assignments (layer_id, global_id)
+    SELECT ${layerId}, unnest(${globalIds}::text[])
+    ON CONFLICT (layer_id, global_id) DO NOTHING
+    RETURNING id, layer_id, global_id, assigned_at
+  `
+  return rows.map(rowToAssignment)
+}
+
+/**
+ * Removes an assignment by its primary key UUID.
+ * Returns true if deleted, false if not found.
+ */
+export async function removeAssignment(id: string): Promise<boolean> {
+  const rows = await sql<{ id: string }>`
+    DELETE FROM layer_assignments
+    WHERE  id = ${id}
+    RETURNING id
+  `
+  return rows.length > 0
+}
+
+/**
+ * Removes all assignments of a specific IFC object from a layer.
+ * Returns the number of rows deleted.
+ */
+export async function removeObjectFromLayer(
+  layerId:  string,
+  globalId: string
+): Promise<number> {
+  const rows = await sql<{ id: string }>`
+    DELETE FROM layer_assignments
+    WHERE  layer_id  = ${layerId}
+    AND    global_id = ${globalId}
+    RETURNING id
+  `
+  return rows.length
+}
+
+/**
+ * Removes ALL assignments for a specific layer.
+ * Called before deleting the layer itself (or use DB CASCADE).
+ */
+export async function removeAllAssignmentsForLayer(
+  layerId: string
+): Promise<number> {
+  const rows = await sql<{ id: string }>`
+    DELETE FROM layer_assignments
+    WHERE  layer_id = ${layerId}
+    RETURNING id
+  `
+  return rows.length
+}
+
+/**
+ * Returns a map of globalId → layerIds[] for ALL assignments.
+ * Efficient for seeding the viewer store's IFCObject.layerIds.
+ */
+export async function buildGlobalIdToLayerIdsMap(): Promise<Map<string, string[]>> {
+  const rows = await sql<{ global_id: string; layer_id: string }>`
+    SELECT global_id, layer_id
+    FROM   layer_assignments
+    ORDER  BY global_id
+  `
+  const map = new Map<string, string[]>()
+  for (const row of rows) {
+    const existing = map.get(row.global_id) ?? []
+    existing.push(row.layer_id)
+    map.set(row.global_id, existing)
+  }
+  return map
+}
+
+
+====================================================================================================
+FILE: src\services\api\layers.api.ts
+====================================================================================================
+
+import { sql }             from '../../database/client'
+import type { LayerRow }   from '../../database/types'
+import type {
+  InformationLayer,
+  CreateLayerPayload,
+} from '../../types'
+
+// ── Row → Domain mapper ──────────────────────────────────────────────────────
+
+function rowToLayer(row: LayerRow): InformationLayer {
+  return {
+    id:          row.id,
+    name:        row.name,
+    category:    row.category,
+    color:       row.color,
+    description: row.description,
+    createdAt:   row.created_at,
+  }
+}
+
+// ── API methods ──────────────────────────────────────────────────────────────
+
+/**
+ * Fetches all information layers, newest first.
+ */
+export async function fetchLayers(): Promise<InformationLayer[]> {
+  const rows = await sql<LayerRow>`
+    SELECT id, name, category, color, description, created_at
+    FROM   information_layers
+    ORDER  BY created_at DESC
+  `
+  return rows.map(rowToLayer)
+}
+
+/**
+ * Fetches a single layer by ID.
+ * Returns null if not found.
+ */
+export async function fetchLayerById(id: string): Promise<InformationLayer | null> {
+  const rows = await sql<LayerRow>`
+    SELECT id, name, category, color, description, created_at
+    FROM   information_layers
+    WHERE  id = ${id}
+    LIMIT  1
+  `
+  return rows.length > 0 ? rowToLayer(rows[0]) : null
+}
+
+/**
+ * Creates a new information layer.
+ * Returns the created layer with server-generated id and createdAt.
+ */
+export async function createLayer(
+  payload: CreateLayerPayload
+): Promise<InformationLayer> {
+  const rows = await sql<LayerRow>`
+    INSERT INTO information_layers (name, category, color, description)
+    VALUES      (${payload.name}, ${payload.category}, ${payload.color}, ${payload.description ?? null})
+    RETURNING   id, name, category, color, description, created_at
+  `
+
+  if (rows.length === 0) {
+    throw new Error('[layers.api] INSERT returned no rows')
+  }
+
+  return rowToLayer(rows[0])
+}
+
+/**
+ * Renames an existing layer.
+ * Returns the updated layer, or null if not found.
+ */
+export async function renameLayer(
+  id:      string,
+  newName: string
+): Promise<InformationLayer | null> {
+  const rows = await sql<LayerRow>`
+    UPDATE information_layers
+    SET    name = ${newName}
+    WHERE  id   = ${id}
+    RETURNING id, name, category, color, description, created_at
+  `
+  return rows.length > 0 ? rowToLayer(rows[0]) : null
+}
+
+/**
+ * Updates the color of a layer.
+ * Returns the updated layer, or null if not found.
+ */
+export async function updateLayerColor(
+  id:    string,
+  color: string
+): Promise<InformationLayer | null> {
+  const rows = await sql<LayerRow>`
+    UPDATE information_layers
+    SET    color = ${color}
+    WHERE  id    = ${id}
+    RETURNING id, name, category, color, description, created_at
+  `
+  return rows.length > 0 ? rowToLayer(rows[0]) : null
+}
+
+/**
+ * Deletes a layer and all its assignments (CASCADE).
+ * Returns true if a row was deleted, false if not found.
+ */
+export async function deleteLayer(id: string): Promise<boolean> {
+  const rows = await sql<{ id: string }>`
+    DELETE FROM information_layers
+    WHERE  id = ${id}
+    RETURNING id
+  `
+  return rows.length > 0
+}
+
+/**
+ * Returns the assignment count for each layer.
+ * Useful for showing "3 elements" badges in the UI.
+ */
+export async function fetchLayerCounts(): Promise<Map<string, number>> {
+  const rows = await sql<{ layer_id: string; count: string }>`
+    SELECT   layer_id, COUNT(*) AS count
+    FROM     layer_assignments
+    GROUP BY layer_id
+  `
+  const map = new Map<string, number>()
+  for (const row of rows) {
+    map.set(row.layer_id, parseInt(row.count, 10))
+  }
+  return map
+}
 
 
 ====================================================================================================
@@ -8494,13 +10042,6 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 FILE: src\store\layer.store.ts
 ====================================================================================================
 
-/**
- * Layer store — owns information layer state and filter state.
- *
- * Phase 1: empty layers (no mock data needed — layers come from DB).
- * Phase 3: will be populated via React Query + Neon API.
- */
-
 import { create } from 'zustand'
 import type { InformationLayer, LayerAssignment } from '../types'
 
@@ -8511,8 +10052,19 @@ interface LayerState {
   activeFilterIds: string[]
 
   // ── Actions ──────────────────────────────────────────────
+
   setLayers:          (layers: InformationLayer[]) => void
   setAssignments:     (assignments: LayerAssignment[]) => void
+
+  /**
+   * Atomically updates both layers and assignments in one render.
+   * Called by React Query hooks after a successful combined fetch.
+   */
+  syncFromDB: (
+    layers:      InformationLayer[],
+    assignments: LayerAssignment[]
+  ) => void
+
   toggleFilter:       (layerId: string) => void
   clearFilters:       () => void
   getLayerById:       (id: string) => InformationLayer | undefined
@@ -8527,6 +10079,8 @@ export const useLayerStore = create<LayerState>((set, get) => ({
 
   setLayers:      (layers)      => set({ layers }),
   setAssignments: (assignments) => set({ assignments }),
+
+  syncFromDB: (layers, assignments) => set({ layers, assignments }),
 
   toggleFilter: (layerId) => {
     set(state => {
@@ -8856,16 +10410,36 @@ interface ViewerState {
   /** Current render mode */
   renderMode:       RenderMode
 
+  /**
+   * Engine action: zoom the camera to fit a single IFC object.
+   * Set by IFCViewer once the ViewerEngine is ready.
+   * null when no engine is mounted.
+   */
+  zoomToObject:     ((globalId: string) => void) | null
+
+  /**
+   * Engine action: isolate one or more IFC objects (hide all others).
+   * Passing an empty array restores full visibility.
+   * Set by IFCViewer once the ViewerEngine is ready.
+   * null when no engine is mounted.
+   */
+  isolateObjects:   ((globalIds: string[]) => void) | null
+
   // ── Actions ──────────────────────────────────────────────
-  setIFCObjects:      (objects: IFCObject[]) => void
-  setSpatialTree:     (tree: IFCSpatialTree | null) => void
-  setModelLoadState:  (state: ModelLoadState) => void
-  setModelError:      (error: string | null) => void
-  setModelMeta:       (fileName: string, fileSize: number) => void
-  setSceneReady:      (ready: boolean) => void
-  setRenderMode:      (mode: RenderMode) => void
-  resetModel:         () => void
-  getObjectByGlobalId:(globalId: string) => IFCObject | undefined
+  setIFCObjects:       (objects: IFCObject[]) => void
+  setSpatialTree:      (tree: IFCSpatialTree | null) => void
+  setModelLoadState:   (state: ModelLoadState) => void
+  setModelError:       (error: string | null) => void
+  setModelMeta:        (fileName: string, fileSize: number) => void
+  setSceneReady:       (ready: boolean) => void
+  setRenderMode:       (mode: RenderMode) => void
+  setEngineActions:    (
+    zoom: (globalId: string) => void,
+    isolate: (globalIds: string[]) => void
+  ) => void
+  clearEngineActions:  () => void
+  resetModel:          () => void
+  getObjectByGlobalId: (globalId: string) => IFCObject | undefined
 }
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
@@ -8877,6 +10451,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   modelFileSize:   null,
   sceneReady:      false,
   renderMode:      'perspective',
+  zoomToObject:    null,
+  isolateObjects:  null,
 
   setIFCObjects:     (objects) => set({ ifcObjects: objects }),
   setSpatialTree:    (tree)    => set({ spatialTree: tree }),
@@ -8886,6 +10462,16 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setSceneReady:     (ready)   => set({ sceneReady: ready }),
   setRenderMode:     (mode)    => set({ renderMode: mode }),
 
+  setEngineActions: (zoom, isolate) => set({
+    zoomToObject:   zoom,
+    isolateObjects: isolate,
+  }),
+
+  clearEngineActions: () => set({
+    zoomToObject:   null,
+    isolateObjects: null,
+  }),
+
   resetModel: () => set({
     ifcObjects:    [],
     spatialTree:   null,
@@ -8893,11 +10479,615 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     modelError:    null,
     modelFileName: null,
     modelFileSize: null,
+    zoomToObject:  null,
+    isolateObjects: null,
   }),
 
   getObjectByGlobalId: (globalId) =>
     get().ifcObjects.find(o => o.globalId === globalId),
 }))
+
+
+====================================================================================================
+FILE: src\styles\layers.css
+====================================================================================================
+
+/* ── Layers tab root ──────────────────────────────────────────
+   Fills the panel-body completely. Children split the height
+   using flex ratios. overflow:hidden prevents any escape.     */
+
+.layers-tab-root {
+  display:        flex;
+  flex-direction: column;
+  height:         100%;
+  overflow:       hidden;
+}
+
+/* ── Layer management section (top half) ──────────────────────
+   Takes 55% of available height by default.
+   min-height:0 is essential — without it a flex child refuses
+   to shrink below its natural content size, causing overflow.  */
+
+.layer-panel {
+  display:        flex;
+  flex-direction: column;
+  flex:           55;           /* proportional, not fixed px  */
+  min-height:     0;            /* CRITICAL — allows shrinking  */
+  overflow:       hidden;
+  border-bottom:  1px solid var(--border-color);
+}
+
+/* ── Sticky zone — always visible, never scrolls ─────────────
+   Contains: section title, filter-clear button, create form.
+   flex-shrink:0 locks it at its natural height.               */
+
+.layer-panel__sticky {
+  flex-shrink: 0;
+}
+
+/* ── Scroll zone — the layer list ────────────────────────────
+   Takes all remaining height. min-height:0 lets it shrink.    */
+
+.layer-panel__scroll {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Subtle scrollbar for dark theme */
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+
+.layer-panel__scroll::-webkit-scrollbar       { width: 4px; }
+.layer-panel__scroll::-webkit-scrollbar-track  { background: transparent; }
+.layer-panel__scroll::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Assignment section (bottom half) ────────────────────────
+   Takes 45% of available height. min-height:0 allows shrinking.
+   This replaces the inline-styled wrapper div in Layout.tsx.   */
+
+.assign-section {
+  display:        flex;
+  flex-direction: column;
+  flex:           45;
+  min-height:     0;
+  overflow:       hidden;
+}
+
+/* ── Assignment section label (sticky) ───────────────────────
+   "ASSIGN TO SELECTION" heading row — never scrolls.           */
+
+.assign-section__label {
+  flex-shrink:    0;
+  padding:        6px 14px;
+  font-size:      10px;
+  font-weight:    700;
+  color:          var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-bottom:  1px solid var(--border-color);
+}
+
+/* ── Assignment panel ─────────────────────────────────────────
+   Fills the assign-section. Its header is sticky; the list
+   scrolls independently.                                       */
+
+.assign-panel {
+  display:        flex;
+  flex-direction: column;
+  flex:           1;
+  min-height:     0;
+  overflow:       hidden;
+}
+
+/* Sticky: selected-element identity row */
+.assign-panel__header {
+  flex-shrink:   0;
+  border-bottom: 1px solid var(--border-color);
+  padding:       10px 14px;
+}
+
+/* Scrollable: the per-layer assign/remove rows */
+.assign-panel__scroll {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+
+.assign-panel__scroll::-webkit-scrollbar       { width: 4px; }
+.assign-panel__scroll::-webkit-scrollbar-track  { background: transparent; }
+.assign-panel__scroll::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Panel header ─────────────────────────────────────────────
+   Title + "Clear Filters" button row.                          */
+
+.layer-panel__header {
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         10px 14px 6px;
+  border-bottom:   1px solid var(--border-color);
+}
+
+.layer-panel__title {
+  font-size:      12px;
+  font-weight:    700;
+  color:          var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.layer-panel__clear-btn {
+  background:    rgba(231, 76, 60, 0.15);
+  border:        1px solid rgba(231, 76, 60, 0.35);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     11px;
+  padding:       3px 8px;
+  cursor:        pointer;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+}
+
+.layer-panel__clear-btn:hover {
+  background: rgba(231, 76, 60, 0.25);
+}
+
+/* ── Create form ──────────────────────────────────────────────
+   Two rows: [name input + color picker] / [category + button].
+   flex-shrink:0 keeps it in the sticky zone.                   */
+
+.layer-create-form {
+  padding:        10px 14px;
+  border-bottom:  1px solid var(--border-color);
+  display:        flex;
+  flex-direction: column;
+  gap:            6px;
+}
+
+.layer-create-form__row {
+  display: flex;
+  gap:     6px;
+}
+
+.layer-create-form__name {
+  flex:          1;
+  background:    var(--bg-input, rgba(255,255,255,0.06));
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  font-size:     12px;
+  padding:       6px 10px;
+  outline:       none;
+  transition:    border-color 0.15s;
+  min-width:     0;
+}
+
+.layer-create-form__name:focus {
+  border-color: var(--accent-blue);
+}
+
+.layer-create-form__color {
+  width:         32px;
+  height:        32px;
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  cursor:        pointer;
+  padding:       2px;
+  background:    transparent;
+  flex-shrink:   0;
+}
+
+.layer-create-form__category {
+  flex:          1;
+  background:    var(--bg-input, rgba(255,255,255,0.06));
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  font-size:     12px;
+  padding:       5px 8px;
+  outline:       none;
+  cursor:        pointer;
+  min-width:     0;
+}
+
+.layer-create-form__category option {
+  background: var(--bg-panel);
+  color:      var(--text-primary);
+}
+
+.layer-create-form__btn {
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  font-size:     12px;
+  font-weight:   600;
+  padding:       6px 12px;
+  cursor:        pointer;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+  flex-shrink:   0;
+}
+
+.layer-create-form__btn:hover:not(:disabled) {
+  background: #1a5ce8;
+}
+
+.layer-create-form__btn:disabled {
+  opacity: 0.4;
+  cursor:  default;
+}
+
+/* ── Layer list rows ──────────────────────────────────────────
+   Lives inside .layer-panel__scroll — no overflow rules here,
+   the parent handles scrolling.                                */
+
+.layer-list {
+  padding: 6px 0;
+}
+
+.layer-row {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  padding:     6px 14px;
+  cursor:      default;
+  transition:  background 0.1s;
+}
+
+.layer-row:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.layer-row--active {
+  background:   rgba(47, 107, 255, 0.08);
+  border-left:  2px solid var(--accent-blue);
+  padding-left: 12px;
+}
+
+.layer-swatch {
+  width:         14px;
+  height:        14px;
+  border-radius: 50%;
+  border:        2px solid rgba(255,255,255,0.2);
+  flex-shrink:   0;
+  cursor:        pointer;
+  transition:    transform 0.1s, border-color 0.1s;
+  background:    transparent; /* overridden by inline style */
+}
+
+.layer-swatch:hover {
+  transform:    scale(1.2);
+  border-color: #fff;
+}
+
+.layer-row__body {
+  flex:           1;
+  min-width:      0;
+  display:        flex;
+  flex-direction: column;
+  gap:            1px;
+}
+
+.layer-row__name {
+  font-size:     12px;
+  color:         var(--text-primary);
+  white-space:   nowrap;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  cursor:        text;
+}
+
+.layer-row__meta {
+  font-size: 10px;
+  color:     var(--text-secondary);
+}
+
+.layer-row__input {
+  font-size:     12px;
+  background:    var(--bg-input, rgba(255,255,255,0.08));
+  border:        1px solid var(--accent-blue);
+  border-radius: 4px;
+  color:         var(--text-primary);
+  padding:       2px 6px;
+  outline:       none;
+  width:         100%;
+}
+
+.layer-count-badge {
+  background:    rgba(255,255,255,0.08);
+  border-radius: 10px;
+  color:         var(--text-secondary);
+  font-size:     10px;
+  font-weight:   600;
+  min-width:     20px;
+  padding:       2px 6px;
+  text-align:    center;
+  flex-shrink:   0;
+}
+
+.layer-delete-btn {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  font-size:   11px;
+  opacity:     0;
+  padding:     2px 4px;
+  transition:  opacity 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.layer-row:hover .layer-delete-btn {
+  opacity: 1;
+}
+
+.layer-delete-btn:hover {
+  color: #e74c3c;
+}
+
+/* ── State messages ───────────────────────────────────────────
+   All live inside the scroll zone so they don't push the
+   sticky header out of frame.                                  */
+
+.layer-empty {
+  color:      var(--text-secondary);
+  font-size:  12px;
+  padding:    24px 14px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.layer-loading {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  color:       var(--text-secondary);
+  font-size:   12px;
+  padding:     16px 14px;
+}
+
+.layer-error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+  word-break:    break-word;
+}
+
+/* Active-filter indicator bar — bottom of the scroll zone */
+.layer-filter-indicator {
+  border-top:  1px solid var(--border-color);
+  color:       var(--accent-blue);
+  font-size:   11px;
+  padding:     8px 14px;
+  text-align:  center;
+  margin-top:  auto;   /* pushes to bottom of scroll content  */
+}
+
+/* ── Assignment panel details ─────────────────────────────────
+   (header styles already defined above)                        */
+
+.assign-panel__name {
+  display:       block;
+  font-size:     12px;
+  font-weight:   600;
+  color:         var(--text-primary);
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.assign-panel__type {
+  color:     var(--text-secondary);
+  font-size: 11px;
+}
+
+.assign-panel__multi {
+  color:      var(--accent-blue);
+  font-size:  11px;
+  margin-top: 4px;
+}
+
+.assign-panel__multi-hint {
+  color:       var(--text-secondary);
+  font-style:  italic;
+  margin-left: 4px;
+}
+
+/* ── Assignment layer rows ────────────────────────────────────
+   Live inside .assign-panel__scroll.                           */
+
+.assign-layer-list {
+  padding: 6px 0;
+}
+
+.assign-layer-row {
+  align-items: center;
+  display:     flex;
+  gap:         8px;
+  padding:     6px 14px;
+  transition:  background 0.1s;
+}
+
+.assign-layer-row:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.assign-layer-row--assigned {
+  background:   rgba(46, 204, 113, 0.06);
+  border-left:  2px solid #2ecc71;
+  padding-left: 12px;
+}
+
+.assign-layer-swatch {
+  width:         10px;
+  height:        10px;
+  border-radius: 50%;
+  flex-shrink:   0;
+}
+
+.assign-layer-name {
+  flex:          1;
+  font-size:     12px;
+  color:         var(--text-primary);
+  min-width:     0;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.assign-btn {
+  border-radius: 5px;
+  border:        none;
+  cursor:        pointer;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       3px 10px;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+  flex-shrink:   0;
+}
+
+.assign-btn--add {
+  background: rgba(47, 107, 255, 0.15);
+  color:      var(--accent-blue);
+  border:     1px solid rgba(47,107,255,0.3);
+}
+
+.assign-btn--add:hover:not(:disabled) {
+  background: rgba(47, 107, 255, 0.28);
+}
+
+.assign-btn--remove {
+  background: rgba(231, 76, 60, 0.12);
+  color:      #e74c3c;
+  border:     1px solid rgba(231,76,60,0.25);
+}
+
+.assign-btn--remove:hover:not(:disabled) {
+  background: rgba(231, 76, 60, 0.22);
+}
+
+.assign-btn:disabled {
+  opacity: 0.4;
+  cursor:  default;
+}
+
+.assign-empty {
+  color:       var(--text-secondary);
+  font-size:   12px;
+  padding:     20px 14px;
+  text-align:  center;
+  line-height: 1.5;
+}
+
+.assign-loading {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  color:       var(--text-secondary);
+  font-size:   12px;
+  padding:     12px 14px;
+}
+
+.assign-error {
+  background:    rgba(231,76,60,0.1);
+  border:        1px solid rgba(231,76,60,0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+  word-break:    break-word;
+}
+
+/* ── Layer filter bar ─────────────────────────────────────────
+   Shown below the 3D viewer when layer filters are active.
+   Completely independent of the panel scroll system.           */
+
+.layer-filter-bar {
+  align-items: center;
+  background:  rgba(47, 107, 255, 0.08);
+  border-top:  1px solid rgba(47, 107, 255, 0.2);
+  display:     flex;
+  flex-wrap:   wrap;
+  gap:         6px;
+  padding:     6px 10px;
+  flex-shrink: 0;
+}
+
+.layer-filter-bar__label {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  flex-shrink: 0;
+}
+
+.layer-chip {
+  align-items:   center;
+  background:    rgba(255,255,255,0.08);
+  border:        1px solid var(--border-color);
+  border-radius: 20px;
+  display:       inline-flex;
+  font-size:     11px;
+  gap:           4px;
+  padding:       2px 8px 2px 6px;
+}
+
+.layer-chip__dot {
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        8px;
+  width:         8px;
+}
+
+.layer-chip__name {
+  color:         var(--text-primary);
+  max-width:     80px;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.layer-chip__remove {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  font-size:   10px;
+  line-height: 1;
+  padding:     0 0 0 2px;
+}
+
+.layer-chip__remove:hover {
+  color: #e74c3c;
+}
+
+.layer-filter-bar__clear {
+  background:    transparent;
+  border:        1px solid rgba(47, 107, 255, 0.4);
+  border-radius: 5px;
+  color:         var(--accent-blue);
+  cursor:        pointer;
+  font-size:     11px;
+  margin-left:   auto;
+  padding:       2px 8px;
+}
+
+.layer-filter-bar__clear:hover {
+  background: rgba(47, 107, 255, 0.12);
+}
 
 
 ====================================================================================================
@@ -10657,14 +12847,33 @@ interface RaycastResult {
   point:    THREE.Vector3
 }
 
+// ── Augmented FragmentsModel interface ───────────────────────────────────────
+// Only declares the methods we actually call. All are verified against
+// @thatopen/fragments@3.4.6 dist/index.d.ts.
+
 interface FragmentsModelInternal {
-  getLocalIds():                     Promise<number[]>
-  getGuidsByLocalIds(ids: number[]): Promise<(string | null)[]>
+  // ID resolution
+  getLocalIds():                       Promise<number[]>
+  getGuidsByLocalIds(ids: number[]):   Promise<(string | null)[]>
+  getLocalIdsByGuids(guids: string[]): Promise<(number | null)[]>
+
+  // Bounding box — CORRECT API for zoom (no mesh walking)
+  getMergedBox(localIds: number[]): Promise<THREE.Box3>
+
+  // Visibility — CORRECT method name is setVisible (not setVisibility)
+  setVisible(localIds: number[] | undefined, visible: boolean): Promise<void>
+  resetVisible(): Promise<void>
+
+  // Raycast
   raycast(params: {
     camera: THREE.PerspectiveCamera | THREE.OrthographicCamera
     mouse:  THREE.Vector2
     dom:    HTMLCanvasElement
   }): Promise<RaycastResult | null>
+
+  // Tiles map — DataMap<string|number, THREE.Mesh>
+  // Used only for debug inspection if needed
+  tiles: Map<string | number, THREE.Mesh>
 }
 
 export class ViewerEngine {
@@ -10683,6 +12892,9 @@ export class ViewerEngine {
   private isDisposed = false
   private ro?: ResizeObserver
 
+  // Tracks isolation state so restoreVisibility() knows whether a reset is needed
+  private isIsolated = false
+
   constructor(config: ViewerEngineConfig) {
     this.config       = config
     this.components   = new OBC.Components()
@@ -10691,7 +12903,6 @@ export class ViewerEngine {
 
   async init(): Promise<void> {
     try {
-      // ── 1. World ──────────────────────────────────────────
       const worlds = this.components.get(OBC.Worlds)
       this.world   = worlds.create<
         OBC.SimpleScene,
@@ -10700,26 +12911,14 @@ export class ViewerEngine {
       >()
 
       this.world.scene    = new OBC.SimpleScene(this.components)
-      this.world.renderer = new OBC.SimpleRenderer(
-        this.components,
-        this.config.container
-      )
-      this.world.camera = new OBC.SimpleCamera(this.components)
+      this.world.renderer = new OBC.SimpleRenderer(this.components, this.config.container)
+      this.world.camera   = new OBC.SimpleCamera(this.components)
 
-      // ── 2. Boot engine ────────────────────────────────────
       this.components.init()
-
-      // ── 2b. Remove "That Open Company" branding ───────────
-      // SimpleRenderer injects a branding overlay element into the container
-      // after init(). We remove it by targeting the known element attributes.
-      // This does NOT modify any library source; it only removes a DOM node
-      // that the library itself appended to our container div.
       this.removeBranding()
 
-      // ── 3. Scene ──────────────────────────────────────────
       this.world.scene.setup()
       this.world.scene.three.background = new THREE.Color(0x070B0F)
-
       this.world.scene.three.add(new THREE.AmbientLight(0xffffff, 0.5))
 
       const sun = new THREE.DirectionalLight(0xffffff, 1.2)
@@ -10739,14 +12938,10 @@ export class ViewerEngine {
       fill.position.set(-10, 5, -10)
       this.world.scene.three.add(fill)
 
-      this.world.scene.three.add(
-        new THREE.GridHelper(100, 100, 0x1C2128, 0x1C2128)
-      )
+      this.world.scene.three.add(new THREE.GridHelper(100, 100, 0x1C2128, 0x1C2128))
 
-      // ── 4. Camera default position ────────────────────────
       this.world.camera.controls.setLookAt(12, 14, 18, 0, 0, 0)
 
-      // ── 5. FragmentsManager ───────────────────────────────
       this.fragmentsManager = this.components.get(OBC.FragmentsManager)
 
       try {
@@ -10775,7 +12970,6 @@ export class ViewerEngine {
         this.loadedModels.push(model)
       })
 
-      // ── 6. IfcLoader ──────────────────────────────────────
       this.ifcLoader = this.components.get(OBC.IfcLoader)
       await this.ifcLoader.setup({
         autoSetWasm: false,
@@ -10785,10 +12979,8 @@ export class ViewerEngine {
         },
       })
 
-      // ── 7. Click / pick handler ───────────────────────────
       this.config.container.addEventListener('click', this.handleClick)
 
-      // ── 8. Resize observer ────────────────────────────────
       this.ro = new ResizeObserver(() => {
         if (!this.isDisposed && this.world?.renderer) {
           this.world.renderer.resize()
@@ -10805,81 +12997,31 @@ export class ViewerEngine {
     }
   }
 
-  /**
-   * Removes the "That Open Company" branding overlay injected by SimpleRenderer.
-   *
-   * @thatopen/components SimpleRenderer appends a small <div> watermark to
-   * the container element after components.init(). This method removes it by
-   * scanning the container's direct children for the known branding element
-   * (identified by its style characteristics or data attributes).
-   *
-   * We do NOT modify library source — only our own container's DOM children.
-   * Called immediately after components.init() so the element is already present.
-   */
   private removeBranding(): void {
     try {
       const container = this.config.container
-
-      // The branding element is a direct child <div> of the container
-      // with fixed positioning and a low z-index watermark.
-      // OBC v3.x injects it with id="thatopen-logo" or a known class.
-      // We target any of the known selectors defensively.
       const selectors = [
-        '#thatopen-logo',
-        '[id*="thatopen"]',
-        '[class*="thatopen"]',
-        '[id*="that-open"]',
-        '[class*="that-open"]',
-        // Fallback: any anchor linking to thatopen.com injected by the library
-        'a[href*="thatopen.com"]',
+        '#thatopen-logo', '[id*="thatopen"]', '[class*="thatopen"]',
+        '[id*="that-open"]', '[class*="that-open"]', 'a[href*="thatopen.com"]',
       ]
-
       for (const selector of selectors) {
-        container.querySelectorAll(selector).forEach(el => {
-          el.remove()
-          console.log(`[ViewerEngine] Removed branding element matching: ${selector}`)
-        })
+        container.querySelectorAll(selector).forEach(el => el.remove())
       }
-
-      // Also scan direct children for any <div> or <a> injected after the canvas
-      // that links to the That Open Company website
       Array.from(container.children).forEach(child => {
-        const tagName = child.tagName.toLowerCase()
-        if (tagName === 'canvas') return // keep the canvas
-
+        if (child.tagName.toLowerCase() === 'canvas') return
         const html = child.outerHTML.toLowerCase()
-        if (
-          html.includes('thatopen') ||
-          html.includes('that open') ||
-          html.includes('thatopen.com')
-        ) {
+        if (html.includes('thatopen') || html.includes('thatopen.com')) {
           child.remove()
-          console.log('[ViewerEngine] Removed branding element via content scan')
         }
       })
-
-    } catch (err) {
-      // Non-critical: if removal fails the branding may appear but the viewer works
-      console.warn('[ViewerEngine] removeBranding failed:', err)
-    }
+    } catch { /* non-critical */ }
   }
 
-  // ────────────────────────────────────────────────────────
-  // Unloads every currently loaded model and frees all
-  // associated GPU and worker resources.
-  //
-  // model.dispose() is the canonical That Open Engine API:
-  //   - Terminates the worker thread slot for this model
-  //   - Frees shared MaterialManager entries
-  //   - Removes model.object from its parent (the scene)
-  //   - Disposes tile mesh geometries
-  //
-  // Called automatically at the top of loadIFC() so that
-  // loading a second IFC always starts from a clean scene.
-  // Also exposed publicly so callers (IFCUploadZone, Layout)
-  // can clear the scene before showing the upload UI.
-  // ────────────────────────────────────────────────────────
+  // ── Unload ────────────────────────────────────────────────
+
   async unloadAll(): Promise<void> {
+    this.isIsolated = false
+
     if (this.loadedModels.length === 0) return
 
     const toDispose = [...this.loadedModels]
@@ -10889,21 +13031,256 @@ export class ViewerEngine {
       try {
         await model.dispose()
       } catch (err) {
-        // Dispose errors are non-critical — log and continue
         console.warn('[ViewerEngine] model.dispose() error:', err)
-        // Fallback: manually remove from scene if dispose() failed
-        try {
-          this.world.scene.three.remove(model.object)
-        } catch {
-          // ignore
-        }
+        try { this.world.scene.three.remove(model.object) } catch { /* ignore */ }
       }
     }
   }
 
-  // ────────────────────────────────────────────────────────
-  // Camera fit
-  // ────────────────────────────────────────────────────────
+  // ── Phase 3+: Zoom to object ──────────────────────────────
+
+  /**
+   * Fits the camera to the bounding box of a single IFC object.
+   *
+   * Uses model.getMergedBox(localIds) — the correct v3.4.6 API.
+   * This is resolved by the worker thread from actual geometry data,
+   * so no mesh traversal is required and LOD tiles are handled correctly.
+   *
+   * Previous broken approach: walking model.object children looking for
+   * mesh.userData.expressID — that key does NOT exist in v3.4.6.
+   * Tiles set userData.sampleId / userData.tileId / userData.itemIds (Set<number>).
+   */
+  async zoomToObject(globalId: string): Promise<void> {
+    console.log('[ViewerEngine] zoomToObject — GlobalId:', globalId)
+
+    if (!this.fragmentsManager?.initialized) {
+      console.warn('[ViewerEngine] zoomToObject: FragmentsManager not initialized')
+      return
+    }
+    if (this.loadedModels.length === 0) {
+      console.warn('[ViewerEngine] zoomToObject: no models loaded')
+      return
+    }
+
+    for (const model of this.loadedModels) {
+      const internal = model as unknown as FragmentsModelInternal
+
+      // Step 1: GlobalId → localId
+      let localIds: (number | null)[] = []
+      try {
+        localIds = await internal.getLocalIdsByGuids([globalId])
+      } catch (err) {
+        console.warn('[ViewerEngine] zoomToObject: getLocalIdsByGuids failed', err)
+        continue
+      }
+
+      const localId = localIds[0]
+      console.log('[ViewerEngine] zoomToObject — localId:', localId)
+
+      if (localId === null || localId === undefined) {
+        console.warn('[ViewerEngine] zoomToObject: GlobalId not found in model')
+        continue
+      }
+
+      // Step 2: Get the bounding box directly from the engine (correct API)
+      // getMergedBox is resolved by the worker from actual geometry — no mesh walking
+      let box: THREE.Box3
+      try {
+        box = await internal.getMergedBox([localId])
+        console.log('[ViewerEngine] zoomToObject — bbox:', box.min, box.max, 'isEmpty:', box.isEmpty())
+      } catch (err) {
+        console.warn('[ViewerEngine] zoomToObject: getMergedBox failed', err)
+        // Fallback: fit to whole model
+        box = new THREE.Box3().setFromObject(model.object)
+        console.log('[ViewerEngine] zoomToObject — fallback to model bbox:', box.isEmpty())
+      }
+
+      if (box.isEmpty()) {
+        console.warn('[ViewerEngine] zoomToObject: bounding box is empty — skipping camera move')
+        return
+      }
+
+      // Step 3: Move camera
+      try {
+        await this.world.camera.controls.fitToBox(box, true, {
+          paddingLeft:   0.5,
+          paddingRight:  0.5,
+          paddingTop:    0.5,
+          paddingBottom: 0.5,
+        })
+        console.log('[ViewerEngine] zoomToObject — camera move complete')
+      } catch (err) {
+        console.warn('[ViewerEngine] zoomToObject: fitToBox failed', err)
+      }
+
+      return // first model that contains the object wins
+    }
+  }
+
+  // ── Phase 3+: Isolate objects ─────────────────────────────
+
+  /**
+   * Isolates a set of IFC objects by hiding everything else.
+   * Passing an empty array restores full visibility.
+   *
+   * Uses model.setVisible(localIds, visible): Promise<void>
+   * which is the correct v3.4.6 API.
+   *
+   * Previous broken approach used setVisibility() — that method does
+   * not exist on FragmentsModel in any version of @thatopen/fragments.
+   */
+  async isolateObjects(globalIds: string[]): Promise<void> {
+    console.log('[ViewerEngine] isolateObjects —', globalIds.length, 'GlobalIds')
+
+    if (!this.fragmentsManager?.initialized) {
+      console.warn('[ViewerEngine] isolateObjects: FragmentsManager not initialized')
+      return
+    }
+    if (this.loadedModels.length === 0) {
+      console.warn('[ViewerEngine] isolateObjects: no models loaded')
+      return
+    }
+
+    if (globalIds.length === 0) {
+      console.log('[ViewerEngine] isolateObjects: empty — restoring visibility')
+      await this.restoreVisibility()
+      return
+    }
+
+    this.isIsolated = true
+
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+
+        // Step 1: resolve target GlobalIds → localIds
+        let targetLocalIds: (number | null)[] = []
+        try {
+          targetLocalIds = await internal.getLocalIdsByGuids(globalIds)
+        } catch (err) {
+          console.warn('[ViewerEngine] isolateObjects: getLocalIdsByGuids failed', err)
+          return
+        }
+
+        const targetSet = new Set<number>(
+          targetLocalIds.filter((id): id is number => id !== null && id !== undefined)
+        )
+        console.log('[ViewerEngine] isolateObjects — target localIds:', targetSet.size)
+
+        if (targetSet.size === 0) {
+          console.warn('[ViewerEngine] isolateObjects: no localIds resolved')
+          return
+        }
+
+        // Step 2: hide everything, then show only targets
+        // setVisible(undefined, false) hides ALL items
+        // setVisible(targetArray, true) shows only the targets
+        try {
+          await internal.setVisible(undefined, false)
+          console.log('[ViewerEngine] isolateObjects — hid all items')
+
+          await internal.setVisible(Array.from(targetSet), true)
+          console.log('[ViewerEngine] isolateObjects — showed', targetSet.size, 'items')
+        } catch (err) {
+          console.warn('[ViewerEngine] isolateObjects: setVisible failed', err)
+        }
+      })
+    )
+
+    console.log('[ViewerEngine] isolateObjects — complete')
+  }
+
+  // ── Phase 3: Layer-filter visibility ─────────────────────
+  // These methods use setVisible/resetVisible (correct API).
+
+  async hideObjects(globalIds: string[]): Promise<void> {
+    if (globalIds.length === 0 || !this.fragmentsManager?.initialized) return
+
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+        try {
+          const localIds = await internal.getLocalIdsByGuids(globalIds)
+          const valid    = localIds.filter((id): id is number => id !== null && id !== undefined)
+          if (valid.length === 0) return
+          await internal.setVisible(valid, false)
+        } catch {
+          // Non-critical — suppress
+        }
+      })
+    )
+  }
+
+  async showObjects(globalIds: string[]): Promise<void> {
+    if (globalIds.length === 0 || !this.fragmentsManager?.initialized) return
+
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+        try {
+          const localIds = await internal.getLocalIdsByGuids(globalIds)
+          const valid    = localIds.filter((id): id is number => id !== null && id !== undefined)
+          if (valid.length === 0) return
+          await internal.setVisible(valid, true)
+        } catch {
+          // Suppress
+        }
+      })
+    )
+  }
+
+  async restoreVisibility(): Promise<void> {
+    if (!this.fragmentsManager?.initialized) return
+
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+        try {
+          // resetVisible() restores all items to visible — correct v3.4.6 API
+          await internal.resetVisible()
+        } catch {
+          // Suppress
+        }
+      })
+    )
+
+    this.isIsolated = false
+  }
+
+  // ── Color overrides ───────────────────────────────────────
+
+  applyColorOverrides(overrides: Map<string, string>): void {
+    if (!this.fragmentsManager?.initialized) return
+    this.colorManager.applyOverrides(overrides, this.loadedModels)
+  }
+
+  resetColors(): void {
+    if (!this.fragmentsManager?.initialized) return
+    this.colorManager.resetAll(this.loadedModels)
+  }
+
+  // ── IFC loading ───────────────────────────────────────────
+
+  async loadIFC(buffer: Uint8Array, fileName: string = 'model'): Promise<FRAGS.FragmentsModel> {
+    if (!this.fragmentsManager.initialized) {
+      throw new Error('FragmentsManager not initialized. Ensure /public/worker.mjs exists.')
+    }
+
+    await this.unloadAll()
+
+    try {
+      const model = await this.ifcLoader.load(buffer, true, fileName)
+      await this.fitCameraToModel(model)
+      return model
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to parse IFC file'
+      this.config.onError(msg)
+      throw err
+    }
+  }
+
+  // ── Camera ────────────────────────────────────────────────
+
   private async fitCameraToModel(model: FRAGS.FragmentsModel): Promise<void> {
     try {
       const box = new THREE.Box3()
@@ -10932,11 +13309,7 @@ export class ViewerEngine {
           c instanceof THREE.DirectionalLight && c.castShadow
         )
         .forEach(sun => {
-          sun.position.set(
-            center.x + maxDim,
-            center.y + maxDim * 2,
-            center.z + maxDim
-          )
+          sun.position.set(center.x + maxDim, center.y + maxDim * 2, center.z + maxDim)
           sun.target.position.copy(center)
           sun.target.updateMatrixWorld()
           sun.shadow.camera.near   = 0.5
@@ -10960,12 +13333,8 @@ export class ViewerEngine {
     }
   }
 
-  // ────────────────────────────────────────────────────────
-  // Click handler
-  // mouse carries raw client coordinates (e.clientX / e.clientY).
-  // The Fragments library's screenToCast() calls getBoundingClientRect()
-  // on the canvas and converts to NDC internally.
-  // ────────────────────────────────────────────────────────
+  // ── Click handler ─────────────────────────────────────────
+
   private handleClick = async (e: MouseEvent): Promise<void> => {
     if (!this.world || !this.fragmentsManager?.initialized) return
     if (this.loadedModels.length === 0) return
@@ -10990,26 +13359,19 @@ export class ViewerEngine {
               mouse,
               dom:    domElement as HTMLCanvasElement,
             })
-          } catch {
-            return
-          }
+          } catch { return }
 
           if (!result || result.localId === undefined) return
 
           let guids: (string | null)[] = []
           try {
             guids = await internal.getGuidsByLocalIds([result.localId])
-          } catch {
-            return
-          }
+          } catch { return }
 
           const globalId = guids[0]
           if (typeof globalId !== 'string' || globalId.length === 0) return
 
-          candidates.push({
-            globalId,
-            distance: result.distance ?? Infinity,
-          })
+          candidates.push({ globalId, distance: result.distance ?? Infinity })
         })
       )
 
@@ -11026,56 +13388,13 @@ export class ViewerEngine {
     }
   }
 
-  /**
-   * Unloads any existing model, then loads the given IFC buffer.
-   * Does NOT call onModelLoaded — that is done by IFCParserService
-   * after extractObjects() completes, ensuring count is never 0.
-   */
-  async loadIFC(
-    buffer:   Uint8Array,
-    fileName: string = 'model'
-  ): Promise<FRAGS.FragmentsModel> {
-    if (!this.fragmentsManager.initialized) {
-      throw new Error(
-        'FragmentsManager not initialized. Ensure /public/worker.mjs exists.'
-      )
-    }
+  // ── Getters ───────────────────────────────────────────────
 
-    // Always start from a clean scene — dispose previous model first
-    await this.unloadAll()
+  getScene(): THREE.Scene         { return this.world.scene.three }
+  getFragmentsManager()           { return this.fragmentsManager }
+  getLoadedModels()               { return this.loadedModels }
 
-    try {
-      const model = await this.ifcLoader.load(buffer, true, fileName)
-      await this.fitCameraToModel(model)
-      return model
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to parse IFC file'
-      this.config.onError(msg)
-      throw err
-    }
-  }
-
-  applyColorOverrides(overrides: Map<string, string>): void {
-    if (!this.fragmentsManager?.initialized) return
-    this.colorManager.applyOverrides(overrides, this.loadedModels)
-  }
-
-  resetColors(): void {
-    if (!this.fragmentsManager?.initialized) return
-    this.colorManager.resetAll(this.loadedModels)
-  }
-
-  getScene(): THREE.Scene {
-    return this.world.scene.three
-  }
-
-  getFragmentsManager(): OBC.FragmentsManager {
-    return this.fragmentsManager
-  }
-
-  getLoadedModels(): FRAGS.FragmentsModel[] {
-    return this.loadedModels
-  }
+  // ── Dispose ───────────────────────────────────────────────
 
   dispose(): void {
     if (this.isDisposed) return
@@ -11084,9 +13403,7 @@ export class ViewerEngine {
       this.ro?.disconnect()
       this.config.container.removeEventListener('click', this.handleClick)
       this.components.dispose()
-    } catch {
-      // Suppress errors during unmount
-    }
+    } catch { /* suppress */ }
   }
 }
 
