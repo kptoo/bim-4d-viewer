@@ -1,0 +1,856 @@
+/* ============================================================
+   zones.css
+   Styles for the Zone management UI.
+
+   Import this in App.css (or replace layers.css import):
+     @import './styles/zones.css';
+
+   All class names are prefixed with .zone- or .insp-zone-
+   to avoid collision with any existing styles.
+   ============================================================ */
+
+/* ── Panel tab badge (count indicator) ───────────────────────
+   Used on the "Zones" tab to show active filter count.         */
+
+.panel-tab__badge {
+  background:    var(--accent-blue);
+  border-radius: 8px;
+  color:         #fff;
+  font-size:     9px;
+  font-weight:   700;
+  line-height:   1;
+  margin-left:   5px;
+  min-width:     16px;
+  padding:       2px 4px;
+  text-align:    center;
+  vertical-align: middle;
+}
+
+/* ── Header zone filter badge ─────────────────────────────────
+   Shown in the header bar when zones are being filtered.       */
+
+.bim-badge--zone-filter {
+  background:    rgba(47, 107, 255, 0.12);
+  border-color:  var(--accent-blue);
+  color:         var(--accent-blue);
+  font-weight:   600;
+}
+
+/* ============================================================
+   ZONE PANEL
+   (replaces LayerPanel)
+   ============================================================ */
+
+.zone-panel {
+  display:        flex;
+  flex-direction: column;
+  height:         100%;
+  overflow:       hidden;
+}
+
+/* ── Sticky zone: header + create form ───────────────────────
+   Never scrolls. Contains the panel title and the new-zone
+   creation form.                                               */
+
+.zone-panel__sticky {
+  flex-shrink: 0;
+}
+
+/* ── Scroll zone: zone card list ─────────────────────────────
+   Takes all remaining height. Scrolls independently.           */
+
+.zone-panel__scroll {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+
+.zone-panel__scroll::-webkit-scrollbar       { width: 4px; }
+.zone-panel__scroll::-webkit-scrollbar-track  { background: transparent; }
+.zone-panel__scroll::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Panel header ─────────────────────────────────────────────
+   Title + "Clear Filters" button.                              */
+
+.zone-panel__header {
+  align-items:     center;
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  justify-content: space-between;
+  padding:         10px 14px 8px;
+}
+
+.zone-panel__title {
+  color:          var(--text-secondary);
+  font-size:      11px;
+  font-weight:    700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.zone-panel__clear-btn {
+  background:    rgba(231, 76, 60, 0.12);
+  border:        1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 5px;
+  color:         #e74c3c;
+  cursor:        pointer;
+  font-size:     11px;
+  padding:       3px 8px;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+}
+.zone-panel__clear-btn:hover { background: rgba(231, 76, 60, 0.22); }
+
+/* ── Zone create form ─────────────────────────────────────────
+   Compact two-row form at the top of the panel.                */
+
+.zone-create-form {
+  border-bottom:  1px solid var(--border-color);
+  display:        flex;
+  flex-direction: column;
+  gap:            6px;
+  padding:        10px 14px;
+}
+
+.zone-create-form__title {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom:  2px;
+}
+
+.zone-create-form__row {
+  display: flex;
+  gap:     6px;
+}
+
+.zone-create-form__name {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  outline:       none;
+  padding:       6px 10px;
+  transition:    border-color 0.15s;
+}
+.zone-create-form__name::placeholder { color: var(--text-secondary); opacity: 0.6; }
+.zone-create-form__name:focus        { border-color: var(--accent-blue); }
+
+.zone-create-form__color {
+  background:  transparent;
+  border:      1px solid var(--border-color);
+  border-radius: 6px;
+  cursor:      pointer;
+  flex-shrink: 0;
+  height:      32px;
+  padding:     2px;
+  width:       34px;
+}
+
+.zone-create-form__category {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  cursor:        pointer;
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  outline:       none;
+  padding:       5px 8px;
+}
+.zone-create-form__category option { background: var(--bg-panel); color: var(--text-primary); }
+
+.zone-create-form__btn {
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  cursor:        pointer;
+  flex-shrink:   0;
+  font-size:     12px;
+  font-weight:   600;
+  padding:       6px 12px;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+}
+.zone-create-form__btn:hover:not(:disabled) { background: #1a5ce8; }
+.zone-create-form__btn:disabled             { cursor: default; opacity: 0.4; }
+
+/* ── Zone card list ───────────────────────────────────────────
+   Vertical list of zone cards.                                 */
+
+.zone-list {
+  padding: 8px 0 12px;
+}
+
+/* ── Zone card ────────────────────────────────────────────────
+   Each zone is a horizontal card with:
+   [swatch] [name + category] [count] [action strip]            */
+
+.zone-card {
+  align-items: center;
+  display:     flex;
+  gap:         10px;
+  padding:     8px 14px;
+  position:    relative;
+  transition:  background 0.1s;
+}
+.zone-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Active filter state — left accent bar */
+.zone-card--filtered {
+  background:   rgba(47, 107, 255, 0.07);
+  border-left:  3px solid var(--accent-blue);
+  padding-left: 11px;
+}
+
+/* Color swatch — double as filter toggle */
+.zone-card__swatch {
+  border:        2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  cursor:        pointer;
+  flex-shrink:   0;
+  height:        16px;
+  transition:    transform 0.12s, border-color 0.12s;
+  width:         16px;
+}
+.zone-card__swatch:hover          { border-color: #fff; transform: scale(1.2); }
+.zone-card--filtered .zone-card__swatch { border-color: #fff; }
+
+/* Name + category column */
+.zone-card__body {
+  display:        flex;
+  flex:           1;
+  flex-direction: column;
+  gap:            2px;
+  min-width:      0;
+}
+
+.zone-card__name {
+  color:         var(--text-primary);
+  cursor:        text;
+  font-size:     12px;
+  font-weight:   500;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zone-card__name-input {
+  background:    rgba(255, 255, 255, 0.08);
+  border:        1px solid var(--accent-blue);
+  border-radius: 4px;
+  color:         var(--text-primary);
+  font-size:     12px;
+  outline:       none;
+  padding:       2px 6px;
+  width:         100%;
+}
+
+.zone-card__category {
+  color:     var(--text-secondary);
+  font-size: 10px;
+}
+
+/* Element count badge */
+.zone-card__count {
+  background:    rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  color:         var(--text-secondary);
+  flex-shrink:   0;
+  font-size:     10px;
+  font-weight:   600;
+  min-width:     22px;
+  padding:       2px 6px;
+  text-align:    center;
+}
+
+/* Action strip — Filter / Isolate / Delete */
+.zone-card__actions {
+  align-items: center;
+  display:     flex;
+  flex-shrink: 0;
+  gap:         4px;
+  opacity:     0;
+  transition:  opacity 0.15s;
+}
+.zone-card:hover .zone-card__actions { opacity: 1; }
+
+.zone-card__action-btn {
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid transparent;
+  border-radius: 4px;
+  color:         var(--text-secondary);
+  cursor:        pointer;
+  font-size:     10px;
+  padding:       2px 7px;
+  transition:    all 0.12s;
+  white-space:   nowrap;
+}
+.zone-card__action-btn:hover {
+  background:   rgba(255, 255, 255, 0.12);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+.zone-card__action-btn--active {
+  background:   rgba(47, 107, 255, 0.18);
+  border-color: var(--accent-blue);
+  color:        var(--accent-blue);
+}
+.zone-card__action-btn--isolate:hover {
+  background:   rgba(46, 204, 113, 0.15);
+  border-color: var(--accent-green);
+  color:        var(--accent-green);
+}
+.zone-card__action-btn--delete:hover {
+  background:   rgba(231, 76, 60, 0.15);
+  border-color: #e74c3c;
+  color:        #e74c3c;
+}
+
+/* ── State messages ───────────────────────────────────────────  */
+
+.zone-empty {
+  padding:    32px 20px;
+  text-align: center;
+}
+.zone-empty__icon  { font-size: 28px; margin-bottom: 10px; }
+.zone-empty__title {
+  color:         var(--text-primary);
+  font-size:     13px;
+  font-weight:   600;
+  margin-bottom: 6px;
+}
+.zone-empty__hint {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  line-height: 1.5;
+}
+
+.zone-loading {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   12px;
+  gap:         8px;
+  padding:     16px 14px;
+}
+
+.zone-error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+  word-break:    break-word;
+}
+
+.zone-filter-indicator {
+  border-top:  1px solid var(--border-color);
+  color:       var(--accent-blue);
+  font-size:   11px;
+  margin-top:  auto;
+  padding:     8px 14px;
+  text-align:  center;
+}
+
+/* ============================================================
+   ZONE ASSIGN WIDGET
+   Inline assignment panel inside the Inspector
+   ============================================================ */
+
+.zone-assign {
+  background:    rgba(255, 255, 255, 0.025);
+  border:        1px solid var(--border-color);
+  border-radius: 8px;
+  display:       flex;
+  flex-direction: column;
+  margin:        0 10px 2px;
+  max-height:    340px;
+  overflow:      hidden;
+}
+
+/* ── Widget header ────────────────────────────────────────────  */
+
+.zone-assign__header {
+  align-items:     center;
+  background:      rgba(47, 107, 255, 0.08);
+  border-bottom:   1px solid rgba(47, 107, 255, 0.2);
+  display:         flex;
+  justify-content: space-between;
+  padding:         8px 12px;
+}
+
+.zone-assign__header-info {
+  display:        flex;
+  flex-direction: column;
+  gap:            2px;
+  min-width:      0;
+}
+
+.zone-assign__header-title {
+  color:       var(--accent-blue);
+  font-size:   11px;
+  font-weight: 700;
+}
+
+.zone-assign__header-sub {
+  color:         var(--text-secondary);
+  font-size:     10px;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zone-assign__multi {
+  color:       var(--accent-blue);
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.zone-assign__close {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  flex-shrink: 0;
+  font-size:   13px;
+  line-height: 1;
+  padding:     2px 4px;
+  transition:  color 0.1s;
+}
+.zone-assign__close:hover { color: var(--text-primary); }
+
+/* ── Quick create wrapper ─────────────────────────────────────  */
+
+.zone-assign__create-wrap {
+  border-bottom: 1px solid var(--border-color);
+  padding:       8px 12px;
+}
+
+/* "＋ Create new zone" toggle button */
+.zone-assign__create-toggle {
+  background:    transparent;
+  border:        1px dashed rgba(47, 107, 255, 0.4);
+  border-radius: 6px;
+  color:         var(--accent-blue);
+  cursor:        pointer;
+  font-size:     11px;
+  padding:       5px 10px;
+  transition:    all 0.12s;
+  width:         100%;
+  text-align:    left;
+}
+.zone-assign__create-toggle:hover {
+  background:   rgba(47, 107, 255, 0.08);
+  border-color: var(--accent-blue);
+}
+
+/* Expanded quick-create form */
+.zone-assign__create-form {
+  display:        flex;
+  flex-direction: column;
+  gap:            6px;
+}
+
+.zone-assign__create-input {
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid var(--accent-blue);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  font-size:     12px;
+  outline:       none;
+  padding:       6px 10px;
+  width:         100%;
+}
+
+.zone-assign__create-color {
+  background:    transparent;
+  border:        1px solid var(--border-color);
+  border-radius: 4px;
+  cursor:        pointer;
+  height:        28px;
+  padding:       2px;
+  width:         32px;
+}
+
+.zone-assign__create-cat {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 5px;
+  color:         var(--text-primary);
+  cursor:        pointer;
+  flex:          1;
+  font-size:     11px;
+  outline:       none;
+  padding:       4px 6px;
+}
+.zone-assign__create-cat option { background: var(--bg-panel); }
+
+.zone-assign__create-actions {
+  display: flex;
+  gap:     6px;
+}
+
+.zone-assign__create-btn {
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 5px;
+  color:         #fff;
+  cursor:        pointer;
+  flex:          1;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       5px 8px;
+  transition:    background 0.12s;
+}
+.zone-assign__create-btn:hover:not(:disabled) { background: #1a5ce8; }
+.zone-assign__create-btn:disabled             { cursor: default; opacity: 0.4; }
+
+.zone-assign__cancel-btn {
+  background:  transparent;
+  border:      1px solid var(--border-color);
+  border-radius: 5px;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  font-size:   11px;
+  padding:     5px 10px;
+  transition:  all 0.12s;
+}
+.zone-assign__cancel-btn:hover {
+  border-color: var(--text-secondary);
+  color:        var(--text-primary);
+}
+
+/* ── Zone list inside widget ──────────────────────────────────  */
+
+.zone-assign__list {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  padding:    4px 0;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+.zone-assign__list::-webkit-scrollbar       { width: 3px; }
+.zone-assign__list::-webkit-scrollbar-track  { background: transparent; }
+.zone-assign__list::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+.zone-assign__row {
+  align-items: center;
+  display:     flex;
+  gap:         8px;
+  padding:     5px 12px;
+  transition:  background 0.1s;
+}
+.zone-assign__row:hover            { background: rgba(255, 255, 255, 0.04); }
+.zone-assign__row--assigned        {
+  background:   rgba(46, 204, 113, 0.05);
+  border-left:  2px solid #2ecc71;
+  padding-left: 10px;
+}
+
+.zone-assign__dot {
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        10px;
+  width:         10px;
+}
+
+.zone-assign__zone-name {
+  color:         var(--text-primary);
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zone-assign__btn {
+  border-radius: 5px;
+  border:        none;
+  cursor:        pointer;
+  flex-shrink:   0;
+  font-size:     10px;
+  font-weight:   600;
+  padding:       3px 8px;
+  transition:    background 0.12s;
+  white-space:   nowrap;
+}
+.zone-assign__btn--add {
+  background: rgba(47, 107, 255, 0.14);
+  border:     1px solid rgba(47, 107, 255, 0.3);
+  color:      var(--accent-blue);
+}
+.zone-assign__btn--add:hover:not(:disabled) { background: rgba(47, 107, 255, 0.26); }
+
+.zone-assign__btn--remove {
+  background: rgba(46, 204, 113, 0.1);
+  border:     1px solid rgba(46, 204, 113, 0.25);
+  color:      var(--accent-green);
+}
+.zone-assign__btn--remove:hover:not(:disabled) { background: rgba(46, 204, 113, 0.22); }
+
+.zone-assign__btn:disabled { cursor: default; opacity: 0.4; }
+
+.zone-assign__loading {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   11px;
+  gap:         6px;
+  padding:     12px;
+}
+
+.zone-assign__empty {
+  color:      var(--text-secondary);
+  font-size:  11px;
+  padding:    14px 12px;
+  text-align: center;
+}
+
+.zone-assign__error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     10px;
+  margin:        4px 12px;
+  padding:       6px 8px;
+}
+
+/* ============================================================
+   ZONE FILTER BAR
+   Below the 3D viewport when zone filters are active.
+   ============================================================ */
+
+.zone-filter-bar {
+  align-items:  center;
+  background:   var(--bg-secondary);
+  border-top:   1px solid var(--border-color);
+  display:      flex;
+  flex-shrink:  0;
+  flex-wrap:    wrap;
+  gap:          6px;
+  padding:      6px 14px;
+}
+
+.zone-filter-bar__label {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space:    nowrap;
+}
+
+/* Zone chip — active zone filter pill */
+.zone-chip {
+  align-items:   center;
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid var(--border-color);
+  border-radius: 14px;
+  display:       inline-flex;
+  gap:           5px;
+  padding:       3px 6px 3px 8px;
+}
+
+.zone-chip__dot {
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        8px;
+  width:         8px;
+}
+
+.zone-chip__name {
+  color:     var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.zone-chip__remove {
+  align-items:   center;
+  background:    transparent;
+  border:        none;
+  border-radius: 50%;
+  color:         var(--text-secondary);
+  cursor:        pointer;
+  display:       flex;
+  font-size:     10px;
+  height:        16px;
+  justify-content: center;
+  line-height:   1;
+  transition:    color 0.1s, background 0.1s;
+  width:         16px;
+}
+.zone-chip__remove:hover {
+  background: rgba(231, 76, 60, 0.2);
+  color:      #e74c3c;
+}
+
+/* "Show All" button — restores full visibility */
+.zone-filter-bar__show-all {
+  background:    rgba(46, 204, 113, 0.1);
+  border:        1px solid rgba(46, 204, 113, 0.25);
+  border-radius: 5px;
+  color:         var(--accent-green);
+  cursor:        pointer;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       3px 10px;
+  transition:    background 0.12s;
+  white-space:   nowrap;
+}
+.zone-filter-bar__show-all:hover { background: rgba(46, 204, 113, 0.2); }
+
+/* "Clear filters" button */
+.zone-filter-bar__clear {
+  background:    transparent;
+  border:        1px solid var(--border-color);
+  border-radius: 5px;
+  color:         var(--text-secondary);
+  cursor:        pointer;
+  font-size:     11px;
+  margin-left:   auto;
+  padding:       3px 10px;
+  transition:    all 0.12s;
+  white-space:   nowrap;
+}
+.zone-filter-bar__clear:hover {
+  border-color: #e74c3c;
+  color:        #e74c3c;
+}
+
+/* ============================================================
+   INSPECTOR additions for zone assignment
+   ============================================================ */
+
+/* Multi-selection badge in element header */
+.insp-multi-badge {
+  background:    rgba(47, 107, 255, 0.15);
+  border:        1px solid rgba(47, 107, 255, 0.35);
+  border-radius: 10px;
+  color:         var(--accent-blue);
+  flex-shrink:   0;
+  font-size:     10px;
+  font-weight:   600;
+  margin-left:   auto;
+  padding:       2px 8px;
+  white-space:   nowrap;
+}
+
+/* "Assign Zone" action button variant */
+.action-btn--zone {
+  position: relative;
+}
+
+/* Badge on "Assign Zone" button showing number of assigned zones */
+.action-btn__badge {
+  background:    var(--accent-blue);
+  border-radius: 8px;
+  color:         #fff;
+  font-size:     9px;
+  font-weight:   700;
+  margin-left:   4px;
+  min-width:     14px;
+  padding:       1px 4px;
+  text-align:    center;
+  vertical-align: middle;
+}
+
+/* Assigned zones summary row (shown when widget is closed) */
+.insp-zones-summary {
+  align-items:  flex-start;
+  border-bottom: 1px solid var(--border-color);
+  display:       flex;
+  gap:           10px;
+  padding:       7px 14px;
+}
+
+.insp-zones-summary__label {
+  color:          var(--text-secondary);
+  flex-shrink:    0;
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.06em;
+  margin-top:     2px;
+  text-transform: uppercase;
+}
+
+.insp-zones-summary__chips {
+  display:   flex;
+  flex-wrap: wrap;
+  gap:       4px;
+}
+
+.insp-zone-chip {
+  align-items:   center;
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid var(--border-color);
+  border-radius: 10px;
+  color:         var(--text-primary);
+  display:       inline-flex;
+  font-size:     10px;
+  gap:           5px;
+  padding:       2px 8px 2px 5px;
+}
+
+.insp-zone-chip__dot {
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        7px;
+  width:         7px;
+}
+
+/* ============================================================
+   LEGACY COMPATIBILITY
+   Keep old .assign-section styles working if any file still
+   references them (LayerAssignmentPanel may remain imported
+   somewhere during a transition period).
+   ============================================================ */
+
+.assign-loading {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   12px;
+  gap:         8px;
+  padding:     12px 14px;
+}
+
+.assign-error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        6px 14px;
+  padding:       6px 8px;
+}
+
+.assign-empty {
+  color:       var(--text-secondary);
+  font-size:   12px;
+  line-height: 1.5;
+  padding:     20px 14px;
+  text-align:  center;
+}

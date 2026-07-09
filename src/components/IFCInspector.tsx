@@ -8,6 +8,7 @@ import { useActivityStore }   from '../store/activity.store'
 import { useLayerStore }      from '../store/layer.store'
 import { useSimulationStore } from '../store/simulation.store'
 import { ifcTypeIcon }        from '../utils/ifc.utils'
+import ZoneAssignWidget       from './zones/ZoneAssignWidget'
 import type { IFCObject, IFCProperty, Activity, SimulationStatus } from '../types'
 
 // ─── Status labels ────────────────────────────────────────────────────────────
@@ -199,8 +200,10 @@ export default function IFCInspector() {
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
 
+  // ── Zone assignment widget state ──────────────────────────
+  const [zoneWidgetOpen, setZoneWidgetOpen] = useState(false)
+
   // ── Isolation toggle state ─────────────────────────────────
-  // Tracks whether the current view is in isolation mode.
   const [isIsolated, setIsIsolated] = useState(false)
 
   const ifcObject: IFCObject | undefined | null = primaryGlobalId
@@ -213,7 +216,8 @@ export default function IFCInspector() {
       ? getActivitiesForObject(ifcObject.globalId)[0]
       : undefined
 
-  const assignedLayers = ifcObject ? getLayersForObject(ifcObject.globalId) : []
+  // Zones (previously "layers") assigned to this object
+  const assignedZones = ifcObject ? getLayersForObject(ifcObject.globalId) : []
 
   const frames = computeAllFrames(activities)
   const status: SimulationStatus = ifcObject
@@ -246,7 +250,6 @@ export default function IFCInspector() {
 
   const handleZoom = useCallback(() => {
     if (!ifcObject || !zoomToObject) return
-    console.log('[IFCInspector] Zoom to', ifcObject.globalId)
     zoomToObject(ifcObject.globalId)
   }, [ifcObject, zoomToObject])
 
@@ -254,24 +257,18 @@ export default function IFCInspector() {
     if (!ifcObject || !isolateObjects) return
 
     if (isIsolated) {
-      // Second press — restore full visibility
-      console.log('[IFCInspector] Restore visibility (end isolation)')
       isolateObjects([])
       setIsIsolated(false)
     } else {
-      // First press — isolate the selected objects
-      // If multiple objects are selected, isolate all of them
       const targets = selectedGlobalIds.size > 1
         ? Array.from(selectedGlobalIds)
         : [ifcObject.globalId]
-      console.log('[IFCInspector] Isolate', targets)
       isolateObjects(targets)
       setIsIsolated(true)
     }
   }, [ifcObject, isolateObjects, isIsolated, selectedGlobalIds])
 
-  // Reset isolation state when selection changes
-  // so the button label stays consistent
+  // Close zone widget and reset isolation when selection changes
   const prevGlobalId = primaryGlobalId
   if (isIsolated && prevGlobalId !== primaryGlobalId) {
     setIsIsolated(false)
@@ -305,10 +302,104 @@ export default function IFCInspector() {
             <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
           </div>
         </div>
+        {/* Multi-selection indicator */}
+        {selectedGlobalIds.size > 1 && (
+          <div className="insp-multi-badge">
+            +{selectedGlobalIds.size - 1} selected
+          </div>
+        )}
       </div>
 
+      {/* ── Quick Actions ─────────────────────────────────────── */}
+      {/*
+        Moved ABOVE property data so it's immediately visible on selection.
+        Primary workflow: select → see actions → act.
+      */}
+      <div className="insp-actions">
+        <button
+          className="action-btn"
+          onClick={handleZoom}
+          disabled={!zoomToObject}
+          title={zoomToObject ? 'Zoom camera to this element' : 'Viewer not ready'}
+        >
+          🔍 Zoom
+        </button>
+
+        <button
+          className={`action-btn${isIsolated ? ' action-btn--active' : ''}`}
+          onClick={handleIsolate}
+          disabled={!isolateObjects}
+          title={
+            !isolateObjects
+              ? 'Viewer not ready'
+              : isIsolated
+                ? 'Restore full model visibility'
+                : selectedGlobalIds.size > 1
+                  ? `Isolate ${selectedGlobalIds.size} selected elements`
+                  : 'Isolate this element'
+          }
+        >
+          {isIsolated ? '👁 Show All' : '💡 Isolate'}
+        </button>
+
+        {/*
+          "Assign Zone" — the primary new action.
+          Opens the ZoneAssignWidget inline below the action bar.
+          The zone-assign button gains an --active state while the widget is open.
+        */}
+        <button
+          className={`action-btn action-btn--zone${zoneWidgetOpen ? ' action-btn--active' : ''}`}
+          onClick={() => setZoneWidgetOpen(v => !v)}
+          title={
+            zoneWidgetOpen
+              ? 'Close zone assignment'
+              : selectedGlobalIds.size > 1
+                ? `Assign ${selectedGlobalIds.size} selected elements to a zone`
+                : 'Assign this element to a zone'
+          }
+        >
+          📐 {zoneWidgetOpen ? 'Close' : 'Assign Zone'}
+          {assignedZones.length > 0 && !zoneWidgetOpen && (
+            <span className="action-btn__badge">{assignedZones.length}</span>
+          )}
+        </button>
+
+        <button
+          className="action-btn"
+          disabled={!linkedActivity}
+          onClick={() => console.log('Show activity', linkedActivity?.id)}
+        >
+          📋 Activity
+        </button>
+      </div>
+
+      {/* ── Zone Assignment Widget (inline, collapsible) ─────── */}
+      {/*
+        Renders directly below the action bar when zoneWidgetOpen = true.
+        Does not navigate away; no tab switch required.
+      */}
+      <ZoneAssignWidget
+        isOpen={zoneWidgetOpen}
+        onClose={() => setZoneWidgetOpen(false)}
+      />
+
+      {/* ── Assigned Zones summary ────────────────────────────── */}
+      {assignedZones.length > 0 && !zoneWidgetOpen && (
+        <div className="insp-zones-summary">
+          <span className="insp-zones-summary__label">Zones</span>
+          <div className="insp-zones-summary__chips">
+            {assignedZones.map(z => (
+              <span key={z.id} className="insp-zone-chip">
+                <span className="insp-zone-chip__dot" style={{ background: z.color }} />
+                {z.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Identity Data ─────────────────────────────────────── */}
-      <Section title="Identity Data" defaultOpen={true}>
+      <Section title="Identity Data" defaultOpen={false}>
         <PropRow
           label="Global ID"
           value={
@@ -342,7 +433,7 @@ export default function IFCInspector() {
       {psetNames.length > 0 && (
         <Section
           title="Property Sets"
-          defaultOpen={true}
+          defaultOpen={false}
           badge={psetNames.length}
         >
           <div className="insp-psets">
@@ -364,59 +455,6 @@ export default function IFCInspector() {
           <ActivityCard activity={linkedActivity} status={status} />
         </Section>
       )}
-
-      {/* ── Information Layers ────────────────────────────────── */}
-      {assignedLayers.length > 0 && (
-        <Section
-          title="Information Layers"
-          defaultOpen={true}
-          badge={assignedLayers.length}
-        >
-          <div className="insp-layers">
-            {assignedLayers.map(layer => (
-              <div key={layer.id} className="insp-layer-row">
-                <span className="insp-layer-dot" style={{ background: layer.color }} />
-                <span className="insp-layer-name">{layer.name}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* ── Quick Actions ─────────────────────────────────────── */}
-      <div className="insp-actions">
-        <button
-          className="action-btn"
-          onClick={handleZoom}
-          disabled={!zoomToObject}
-          title={zoomToObject ? 'Zoom camera to this element' : 'Viewer not ready'}
-        >
-          🔍 Zoom To
-        </button>
-        <button
-          className={`action-btn${isIsolated ? ' action-btn--active' : ''}`}
-          onClick={handleIsolate}
-          disabled={!isolateObjects}
-          title={
-            !isolateObjects
-              ? 'Viewer not ready'
-              : isIsolated
-                ? 'Restore full model visibility'
-                : selectedGlobalIds.size > 1
-                  ? `Isolate ${selectedGlobalIds.size} selected elements`
-                  : 'Hide all other elements'
-          }
-        >
-          {isIsolated ? '👁 Show All' : '💡 Isolate'}
-        </button>
-        <button
-          className="action-btn"
-          disabled={!linkedActivity}
-          onClick={() => console.log('Show activity', linkedActivity?.id)}
-        >
-          📋 Activity
-        </button>
-      </div>
 
     </div>
   )

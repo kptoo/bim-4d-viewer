@@ -1,4 +1,6 @@
 @import './styles/upload.css';
+@import './styles/layers.css';
+@import './styles/zones.css';
 
 :root {
   --bg-primary: #0D1117;

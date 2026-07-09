@@ -5,13 +5,13 @@ import GanttPanel                from './GanttPanel'
 import TimelineSlider            from './TimelineSlider'
 import IFCInspector              from './IFCInspector'
 import IFCObjectTree             from './IFCObjectTree'
-import LayerPanel                from './layers/LayerPanel'
-import LayerAssignmentPanel      from './layers/LayerAssignmentPanel'
-import LayerFilterBar            from './layers/LayerFilterBar'
+import ZonePanel                 from './zones/ZonePanel'
+import ZoneFilterBar             from './zones/ZoneFilterBar'
 import { useViewerStore }        from '../store/viewer.store'
+import { useLayerStore }         from '../store/layer.store'
 import { IFCUploadService }      from '../services/ifc/IFCUploadService'
 
-type RightTab = 'inspector' | 'tree' | 'layers'
+type RightTab = 'inspector' | 'tree' | 'zones'
 
 export default function Layout() {
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
@@ -19,6 +19,9 @@ export default function Layout() {
   const modelFileName  = useViewerStore(s => s.modelFileName)
   const modelFileSize  = useViewerStore(s => s.modelFileSize)
   const resetModel     = useViewerStore(s => s.resetModel)
+
+  // Zone filter count for tab badge
+  const activeFilterIds = useLayerStore(s => s.activeFilterIds)
 
   const [rightTab, setRightTab] = useState<RightTab>('inspector')
 
@@ -50,6 +53,12 @@ export default function Layout() {
           <span className="bim-badge">
             {ifcObjects.length} Elements
           </span>
+          {/* Zone filter indicator in header */}
+          {activeFilterIds.length > 0 && (
+            <span className="bim-badge bim-badge--zone-filter">
+              📐 {activeFilterIds.length} zone{activeFilterIds.length !== 1 ? 's' : ''} filtered
+            </span>
+          )}
         </div>
 
         <div className="bim-header__right">
@@ -78,8 +87,9 @@ export default function Layout() {
           <ErrorBoundary context="3D Viewer">
             <IFCViewer />
           </ErrorBoundary>
-          <ErrorBoundary context="Layer Filter Bar">
-            <LayerFilterBar />
+          {/* Zone filter bar replaces layer filter bar — same store, updated copy */}
+          <ErrorBoundary context="Zone Filter Bar">
+            <ZoneFilterBar />
           </ErrorBoundary>
         </div>
       </div>
@@ -108,7 +118,7 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Right: Inspector | Object Tree | Layers */}
+        {/* Right: Inspector | Object Tree | Zones */}
         <div className="panel" style={{ borderRight: 'none' }}>
           <div className="panel-header">
             <div className="panel-tabs">
@@ -124,11 +134,18 @@ export default function Layout() {
               >
                 Object Tree
               </button>
+              {/*
+                Renamed from "Layers" → "Zones" throughout.
+                Active filter count badge shows when filters are on.
+              */}
               <button
-                className={`panel-tab${rightTab === 'layers' ? ' panel-tab--active' : ''}`}
-                onClick={() => setRightTab('layers')}
+                className={`panel-tab${rightTab === 'zones' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('zones')}
               >
-                Layers
+                Zones
+                {activeFilterIds.length > 0 && (
+                  <span className="panel-tab__badge">{activeFilterIds.length}</span>
+                )}
               </button>
             </div>
             <div className="panel-header__actions">
@@ -151,27 +168,14 @@ export default function Layout() {
               </ErrorBoundary>
 
             ) : (
-              /* ── Layers tab ───────────────────────────────────────────
-                 .layers-tab-root is a flex column that fills panel-body.
-                 Its two children (.layer-panel and .assign-section) share
-                 the height via flex:55 / flex:45, both with min-height:0
-                 so they can shrink and allow their own scroll zones to
-                 work correctly at any viewport height.                  */
-              <ErrorBoundary context="Layers Panel">
-                <div className="layers-tab-root">
-
-                  {/* Top section: layer management */}
-                  <LayerPanel />
-
-                  {/* Bottom section: assign selected objects to layers */}
-                  <div className="assign-section">
-                    <div className="assign-section__label">
-                      Assign to Selection
-                    </div>
-                    <LayerAssignmentPanel />
-                  </div>
-
-                </div>
+              /*
+                Zones tab — replaces the old two-section "Layers + Assign" split.
+                ZonePanel is a single unified surface for zone management.
+                Assignment is handled inline in the Inspector via ZoneAssignWidget,
+                so the Zones tab no longer needs a separate assignment section.
+              */
+              <ErrorBoundary context="Zones Panel">
+                <ZonePanel />
               </ErrorBoundary>
             )}
 
