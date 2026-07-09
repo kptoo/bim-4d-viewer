@@ -1,0 +1,596 @@
+/* ── Layers tab root ──────────────────────────────────────────
+   Fills the panel-body completely. Children split the height
+   using flex ratios. overflow:hidden prevents any escape.     */
+
+.layers-tab-root {
+  display:        flex;
+  flex-direction: column;
+  height:         100%;
+  overflow:       hidden;
+}
+
+/* ── Layer management section (top half) ──────────────────────
+   Takes 55% of available height by default.
+   min-height:0 is essential — without it a flex child refuses
+   to shrink below its natural content size, causing overflow.  */
+
+.layer-panel {
+  display:        flex;
+  flex-direction: column;
+  flex:           55;           /* proportional, not fixed px  */
+  min-height:     0;            /* CRITICAL — allows shrinking  */
+  overflow:       hidden;
+  border-bottom:  1px solid var(--border-color);
+}
+
+/* ── Sticky zone — always visible, never scrolls ─────────────
+   Contains: section title, filter-clear button, create form.
+   flex-shrink:0 locks it at its natural height.               */
+
+.layer-panel__sticky {
+  flex-shrink: 0;
+}
+
+/* ── Scroll zone — the layer list ────────────────────────────
+   Takes all remaining height. min-height:0 lets it shrink.    */
+
+.layer-panel__scroll {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Subtle scrollbar for dark theme */
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+
+.layer-panel__scroll::-webkit-scrollbar       { width: 4px; }
+.layer-panel__scroll::-webkit-scrollbar-track  { background: transparent; }
+.layer-panel__scroll::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Assignment section (bottom half) ────────────────────────
+   Takes 45% of available height. min-height:0 allows shrinking.
+   This replaces the inline-styled wrapper div in Layout.tsx.   */
+
+.assign-section {
+  display:        flex;
+  flex-direction: column;
+  flex:           45;
+  min-height:     0;
+  overflow:       hidden;
+}
+
+/* ── Assignment section label (sticky) ───────────────────────
+   "ASSIGN TO SELECTION" heading row — never scrolls.           */
+
+.assign-section__label {
+  flex-shrink:    0;
+  padding:        6px 14px;
+  font-size:      10px;
+  font-weight:    700;
+  color:          var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-bottom:  1px solid var(--border-color);
+}
+
+/* ── Assignment panel ─────────────────────────────────────────
+   Fills the assign-section. Its header is sticky; the list
+   scrolls independently.                                       */
+
+.assign-panel {
+  display:        flex;
+  flex-direction: column;
+  flex:           1;
+  min-height:     0;
+  overflow:       hidden;
+}
+
+/* Sticky: selected-element identity row */
+.assign-panel__header {
+  flex-shrink:   0;
+  border-bottom: 1px solid var(--border-color);
+  padding:       10px 14px;
+}
+
+/* Scrollable: the per-layer assign/remove rows */
+.assign-panel__scroll {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+
+.assign-panel__scroll::-webkit-scrollbar       { width: 4px; }
+.assign-panel__scroll::-webkit-scrollbar-track  { background: transparent; }
+.assign-panel__scroll::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Panel header ─────────────────────────────────────────────
+   Title + "Clear Filters" button row.                          */
+
+.layer-panel__header {
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         10px 14px 6px;
+  border-bottom:   1px solid var(--border-color);
+}
+
+.layer-panel__title {
+  font-size:      12px;
+  font-weight:    700;
+  color:          var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.layer-panel__clear-btn {
+  background:    rgba(231, 76, 60, 0.15);
+  border:        1px solid rgba(231, 76, 60, 0.35);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     11px;
+  padding:       3px 8px;
+  cursor:        pointer;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+}
+
+.layer-panel__clear-btn:hover {
+  background: rgba(231, 76, 60, 0.25);
+}
+
+/* ── Create form ──────────────────────────────────────────────
+   Two rows: [name input + color picker] / [category + button].
+   flex-shrink:0 keeps it in the sticky zone.                   */
+
+.layer-create-form {
+  padding:        10px 14px;
+  border-bottom:  1px solid var(--border-color);
+  display:        flex;
+  flex-direction: column;
+  gap:            6px;
+}
+
+.layer-create-form__row {
+  display: flex;
+  gap:     6px;
+}
+
+.layer-create-form__name {
+  flex:          1;
+  background:    var(--bg-input, rgba(255,255,255,0.06));
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  font-size:     12px;
+  padding:       6px 10px;
+  outline:       none;
+  transition:    border-color 0.15s;
+  min-width:     0;
+}
+
+.layer-create-form__name:focus {
+  border-color: var(--accent-blue);
+}
+
+.layer-create-form__color {
+  width:         32px;
+  height:        32px;
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  cursor:        pointer;
+  padding:       2px;
+  background:    transparent;
+  flex-shrink:   0;
+}
+
+.layer-create-form__category {
+  flex:          1;
+  background:    var(--bg-input, rgba(255,255,255,0.06));
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  font-size:     12px;
+  padding:       5px 8px;
+  outline:       none;
+  cursor:        pointer;
+  min-width:     0;
+}
+
+.layer-create-form__category option {
+  background: var(--bg-panel);
+  color:      var(--text-primary);
+}
+
+.layer-create-form__btn {
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  font-size:     12px;
+  font-weight:   600;
+  padding:       6px 12px;
+  cursor:        pointer;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+  flex-shrink:   0;
+}
+
+.layer-create-form__btn:hover:not(:disabled) {
+  background: #1a5ce8;
+}
+
+.layer-create-form__btn:disabled {
+  opacity: 0.4;
+  cursor:  default;
+}
+
+/* ── Layer list rows ──────────────────────────────────────────
+   Lives inside .layer-panel__scroll — no overflow rules here,
+   the parent handles scrolling.                                */
+
+.layer-list {
+  padding: 6px 0;
+}
+
+.layer-row {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  padding:     6px 14px;
+  cursor:      default;
+  transition:  background 0.1s;
+}
+
+.layer-row:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.layer-row--active {
+  background:   rgba(47, 107, 255, 0.08);
+  border-left:  2px solid var(--accent-blue);
+  padding-left: 12px;
+}
+
+.layer-swatch {
+  width:         14px;
+  height:        14px;
+  border-radius: 50%;
+  border:        2px solid rgba(255,255,255,0.2);
+  flex-shrink:   0;
+  cursor:        pointer;
+  transition:    transform 0.1s, border-color 0.1s;
+  background:    transparent; /* overridden by inline style */
+}
+
+.layer-swatch:hover {
+  transform:    scale(1.2);
+  border-color: #fff;
+}
+
+.layer-row__body {
+  flex:           1;
+  min-width:      0;
+  display:        flex;
+  flex-direction: column;
+  gap:            1px;
+}
+
+.layer-row__name {
+  font-size:     12px;
+  color:         var(--text-primary);
+  white-space:   nowrap;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  cursor:        text;
+}
+
+.layer-row__meta {
+  font-size: 10px;
+  color:     var(--text-secondary);
+}
+
+.layer-row__input {
+  font-size:     12px;
+  background:    var(--bg-input, rgba(255,255,255,0.08));
+  border:        1px solid var(--accent-blue);
+  border-radius: 4px;
+  color:         var(--text-primary);
+  padding:       2px 6px;
+  outline:       none;
+  width:         100%;
+}
+
+.layer-count-badge {
+  background:    rgba(255,255,255,0.08);
+  border-radius: 10px;
+  color:         var(--text-secondary);
+  font-size:     10px;
+  font-weight:   600;
+  min-width:     20px;
+  padding:       2px 6px;
+  text-align:    center;
+  flex-shrink:   0;
+}
+
+.layer-delete-btn {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  font-size:   11px;
+  opacity:     0;
+  padding:     2px 4px;
+  transition:  opacity 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.layer-row:hover .layer-delete-btn {
+  opacity: 1;
+}
+
+.layer-delete-btn:hover {
+  color: #e74c3c;
+}
+
+/* ── State messages ───────────────────────────────────────────
+   All live inside the scroll zone so they don't push the
+   sticky header out of frame.                                  */
+
+.layer-empty {
+  color:      var(--text-secondary);
+  font-size:  12px;
+  padding:    24px 14px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.layer-loading {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  color:       var(--text-secondary);
+  font-size:   12px;
+  padding:     16px 14px;
+}
+
+.layer-error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+  word-break:    break-word;
+}
+
+/* Active-filter indicator bar — bottom of the scroll zone */
+.layer-filter-indicator {
+  border-top:  1px solid var(--border-color);
+  color:       var(--accent-blue);
+  font-size:   11px;
+  padding:     8px 14px;
+  text-align:  center;
+  margin-top:  auto;   /* pushes to bottom of scroll content  */
+}
+
+/* ── Assignment panel details ─────────────────────────────────
+   (header styles already defined above)                        */
+
+.assign-panel__name {
+  display:       block;
+  font-size:     12px;
+  font-weight:   600;
+  color:         var(--text-primary);
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.assign-panel__type {
+  color:     var(--text-secondary);
+  font-size: 11px;
+}
+
+.assign-panel__multi {
+  color:      var(--accent-blue);
+  font-size:  11px;
+  margin-top: 4px;
+}
+
+.assign-panel__multi-hint {
+  color:       var(--text-secondary);
+  font-style:  italic;
+  margin-left: 4px;
+}
+
+/* ── Assignment layer rows ────────────────────────────────────
+   Live inside .assign-panel__scroll.                           */
+
+.assign-layer-list {
+  padding: 6px 0;
+}
+
+.assign-layer-row {
+  align-items: center;
+  display:     flex;
+  gap:         8px;
+  padding:     6px 14px;
+  transition:  background 0.1s;
+}
+
+.assign-layer-row:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.assign-layer-row--assigned {
+  background:   rgba(46, 204, 113, 0.06);
+  border-left:  2px solid #2ecc71;
+  padding-left: 12px;
+}
+
+.assign-layer-swatch {
+  width:         10px;
+  height:        10px;
+  border-radius: 50%;
+  flex-shrink:   0;
+}
+
+.assign-layer-name {
+  flex:          1;
+  font-size:     12px;
+  color:         var(--text-primary);
+  min-width:     0;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.assign-btn {
+  border-radius: 5px;
+  border:        none;
+  cursor:        pointer;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       3px 10px;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+  flex-shrink:   0;
+}
+
+.assign-btn--add {
+  background: rgba(47, 107, 255, 0.15);
+  color:      var(--accent-blue);
+  border:     1px solid rgba(47,107,255,0.3);
+}
+
+.assign-btn--add:hover:not(:disabled) {
+  background: rgba(47, 107, 255, 0.28);
+}
+
+.assign-btn--remove {
+  background: rgba(231, 76, 60, 0.12);
+  color:      #e74c3c;
+  border:     1px solid rgba(231,76,60,0.25);
+}
+
+.assign-btn--remove:hover:not(:disabled) {
+  background: rgba(231, 76, 60, 0.22);
+}
+
+.assign-btn:disabled {
+  opacity: 0.4;
+  cursor:  default;
+}
+
+.assign-empty {
+  color:       var(--text-secondary);
+  font-size:   12px;
+  padding:     20px 14px;
+  text-align:  center;
+  line-height: 1.5;
+}
+
+.assign-loading {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  color:       var(--text-secondary);
+  font-size:   12px;
+  padding:     12px 14px;
+}
+
+.assign-error {
+  background:    rgba(231,76,60,0.1);
+  border:        1px solid rgba(231,76,60,0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+  word-break:    break-word;
+}
+
+/* ── Layer filter bar ─────────────────────────────────────────
+   Shown below the 3D viewer when layer filters are active.
+   Completely independent of the panel scroll system.           */
+
+.layer-filter-bar {
+  align-items: center;
+  background:  rgba(47, 107, 255, 0.08);
+  border-top:  1px solid rgba(47, 107, 255, 0.2);
+  display:     flex;
+  flex-wrap:   wrap;
+  gap:         6px;
+  padding:     6px 10px;
+  flex-shrink: 0;
+}
+
+.layer-filter-bar__label {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  flex-shrink: 0;
+}
+
+.layer-chip {
+  align-items:   center;
+  background:    rgba(255,255,255,0.08);
+  border:        1px solid var(--border-color);
+  border-radius: 20px;
+  display:       inline-flex;
+  font-size:     11px;
+  gap:           4px;
+  padding:       2px 8px 2px 6px;
+}
+
+.layer-chip__dot {
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        8px;
+  width:         8px;
+}
+
+.layer-chip__name {
+  color:         var(--text-primary);
+  max-width:     80px;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.layer-chip__remove {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  font-size:   10px;
+  line-height: 1;
+  padding:     0 0 0 2px;
+}
+
+.layer-chip__remove:hover {
+  color: #e74c3c;
+}
+
+.layer-filter-bar__clear {
+  background:    transparent;
+  border:        1px solid rgba(47, 107, 255, 0.4);
+  border-radius: 5px;
+  color:         var(--accent-blue);
+  cursor:        pointer;
+  font-size:     11px;
+  margin-left:   auto;
+  padding:       2px 8px;
+}
+
+.layer-filter-bar__clear:hover {
+  background: rgba(47, 107, 255, 0.12);
+}

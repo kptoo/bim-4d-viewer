@@ -1,14 +1,17 @@
-import { useState } from 'react'
-import { ErrorBoundary } from '../app/providers/ErrorBoundary'
-import IFCViewer from './IFCViewer'
-import GanttPanel from './GanttPanel'
-import TimelineSlider from './TimelineSlider'
-import IFCInspector from './IFCInspector'
-import IFCObjectTree from './IFCObjectTree'
-import { useViewerStore } from '../store/viewer.store'
-import { IFCUploadService } from '../services/ifc/IFCUploadService'
+import { useState }              from 'react'
+import { ErrorBoundary }         from '../app/providers/ErrorBoundary'
+import IFCViewer                 from './IFCViewer'
+import GanttPanel                from './GanttPanel'
+import TimelineSlider            from './TimelineSlider'
+import IFCInspector              from './IFCInspector'
+import IFCObjectTree             from './IFCObjectTree'
+import LayerPanel                from './layers/LayerPanel'
+import LayerAssignmentPanel      from './layers/LayerAssignmentPanel'
+import LayerFilterBar            from './layers/LayerFilterBar'
+import { useViewerStore }        from '../store/viewer.store'
+import { IFCUploadService }      from '../services/ifc/IFCUploadService'
 
-type RightTab = 'inspector' | 'tree'
+type RightTab = 'inspector' | 'tree' | 'layers'
 
 export default function Layout() {
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
@@ -21,6 +24,7 @@ export default function Layout() {
 
   return (
     <div className="bim-layout">
+
       {/* ── HEADER ── */}
       <header className="bim-header">
         <div className="bim-header__logo">
@@ -70,9 +74,12 @@ export default function Layout() {
             <button className="panel-action-btn">Wireframe</button>
           </div>
         </div>
-        <div className="panel-body">
+        <div className="panel-body" style={{ flexDirection: 'column' }}>
           <ErrorBoundary context="3D Viewer">
             <IFCViewer />
+          </ErrorBoundary>
+          <ErrorBoundary context="Layer Filter Bar">
+            <LayerFilterBar />
           </ErrorBoundary>
         </div>
       </div>
@@ -84,6 +91,8 @@ export default function Layout() {
 
       {/* ── BOTTOM ROW ── */}
       <div className="bim-bottom">
+
+        {/* Left: Gantt */}
         <div className="panel" style={{ borderLeft: 'none' }}>
           <div className="panel-header">
             <span className="panel-header__label">Gantt Schedule</span>
@@ -99,10 +108,9 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Right panel — tabbed: IFC Inspector | Object Tree */}
+        {/* Right: Inspector | Object Tree | Layers */}
         <div className="panel" style={{ borderRight: 'none' }}>
           <div className="panel-header">
-            {/* Tab switcher embedded in header */}
             <div className="panel-tabs">
               <button
                 className={`panel-tab${rightTab === 'inspector' ? ' panel-tab--active' : ''}`}
@@ -116,6 +124,12 @@ export default function Layout() {
               >
                 Object Tree
               </button>
+              <button
+                className={`panel-tab${rightTab === 'layers' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('layers')}
+              >
+                Layers
+              </button>
             </div>
             <div className="panel-header__actions">
               {rightTab === 'inspector' && (
@@ -123,18 +137,47 @@ export default function Layout() {
               )}
             </div>
           </div>
-          <div className="panel-body">
+
+          <div className="panel-body" style={{ overflow: 'hidden' }}>
+
             {rightTab === 'inspector' ? (
               <ErrorBoundary context="IFC Inspector">
                 <IFCInspector />
               </ErrorBoundary>
-            ) : (
+
+            ) : rightTab === 'tree' ? (
               <ErrorBoundary context="IFC Object Tree">
                 <IFCObjectTree />
               </ErrorBoundary>
+
+            ) : (
+              /* ── Layers tab ───────────────────────────────────────────
+                 .layers-tab-root is a flex column that fills panel-body.
+                 Its two children (.layer-panel and .assign-section) share
+                 the height via flex:55 / flex:45, both with min-height:0
+                 so they can shrink and allow their own scroll zones to
+                 work correctly at any viewport height.                  */
+              <ErrorBoundary context="Layers Panel">
+                <div className="layers-tab-root">
+
+                  {/* Top section: layer management */}
+                  <LayerPanel />
+
+                  {/* Bottom section: assign selected objects to layers */}
+                  <div className="assign-section">
+                    <div className="assign-section__label">
+                      Assign to Selection
+                    </div>
+                    <LayerAssignmentPanel />
+                  </div>
+
+                </div>
+              </ErrorBoundary>
             )}
+
           </div>
         </div>
+
       </div>
     </div>
   )

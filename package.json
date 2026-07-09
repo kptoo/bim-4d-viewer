@@ -1,34 +1,33 @@
 {
   "name": "bim-4d-viewer",
-  "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev":     "vite",
+    "build":   "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:ui": "vitest --ui"
+    "test":    "vitest"
   },
   "dependencies": {
-    "@thatopen/components": "^3.4.6",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "three": "^0.182.0",
-    "web-ifc": "^0.0.77",
-    "zustand": "^4.4.7"
+    "@neondatabase/serverless": "^0.10.4",
+    "@tanstack/react-query":   "^5.56.2",
+    "@thatopen/components":    "^3.4.6",
+    "react":                   "^18.2.0",
+    "react-dom":               "^18.2.0",
+    "three":                   "^0.182.0",
+    "web-ifc":                 "^0.0.77",
+    "zustand":                 "^4.4.7"
   },
   "devDependencies": {
-    "@types/react": "^18.2.48",
-    "@types/react-dom": "^18.2.18",
-    "@types/three": "latest",
-    "@vitejs/plugin-react": "^4.2.1",
-    "@vitest/ui": "^1.2.0",
-    "typescript": "^5.3.3",
-    "vite": "^5.0.8",
+    "@types/react":                "^18.2.48",
+    "@types/react-dom":            "^18.2.18",
+    "@types/three":                "latest",
+    "@vitejs/plugin-react":        "^4.2.1",
+    "@vitest/ui":                  "^1.2.0",
+    "typescript":                  "^5.3.3",
+    "vite":                        "^5.0.8",
     "vite-plugin-top-level-await": "^1.4.4",
-    "vite-plugin-wasm": "^3.3.0",
-    "vitest": "^1.2.0"
+    "vite-plugin-wasm":            "^3.3.0",
+    "vitest":                      "^1.2.0"
   }
 }

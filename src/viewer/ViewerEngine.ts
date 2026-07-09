@@ -17,14 +17,33 @@ interface RaycastResult {
   point:    THREE.Vector3
 }
 
+// ── Augmented FragmentsModel interface ───────────────────────────────────────
+// Only declares the methods we actually call. All are verified against
+// @thatopen/fragments@3.4.6 dist/index.d.ts.
+
 interface FragmentsModelInternal {
-  getLocalIds():                     Promise<number[]>
-  getGuidsByLocalIds(ids: number[]): Promise<(string | null)[]>
+  // ID resolution
+  getLocalIds():                       Promise<number[]>
+  getGuidsByLocalIds(ids: number[]):   Promise<(string | null)[]>
+  getLocalIdsByGuids(guids: string[]): Promise<(number | null)[]>
+
+  // Bounding box — CORRECT API for zoom (no mesh walking)
+  getMergedBox(localIds: number[]): Promise<THREE.Box3>
+
+  // Visibility — CORRECT method name is setVisible (not setVisibility)
+  setVisible(localIds: number[] | undefined, visible: boolean): Promise<void>
+  resetVisible(): Promise<void>
+
+  // Raycast
   raycast(params: {
     camera: THREE.PerspectiveCamera | THREE.OrthographicCamera
     mouse:  THREE.Vector2
     dom:    HTMLCanvasElement
   }): Promise<RaycastResult | null>
+
+  // Tiles map — DataMap<string|number, THREE.Mesh>
+  // Used only for debug inspection if needed
+  tiles: Map<string | number, THREE.Mesh>
 }
 
 export class ViewerEngine {
@@ -43,6 +62,9 @@ export class ViewerEngine {
   private isDisposed = false
   private ro?: ResizeObserver
 
+  // Tracks isolation state so restoreVisibility() knows whether a reset is needed
+  private isIsolated = false
+
   constructor(config: ViewerEngineConfig) {
     this.config       = config
     this.components   = new OBC.Components()
@@ -51,7 +73,6 @@ export class ViewerEngine {
 
   async init(): Promise<void> {
     try {
-      // ── 1. World ──────────────────────────────────────────
       const worlds = this.components.get(OBC.Worlds)
       this.world   = worlds.create<
         OBC.SimpleScene,
@@ -60,26 +81,14 @@ export class ViewerEngine {
       >()
 
       this.world.scene    = new OBC.SimpleScene(this.components)
-      this.world.renderer = new OBC.SimpleRenderer(
-        this.components,
-        this.config.container
-      )
-      this.world.camera = new OBC.SimpleCamera(this.components)
+      this.world.renderer = new OBC.SimpleRenderer(this.components, this.config.container)
+      this.world.camera   = new OBC.SimpleCamera(this.components)
 
-      // ── 2. Boot engine ────────────────────────────────────
       this.components.init()
-
-      // ── 2b. Remove "That Open Company" branding ───────────
-      // SimpleRenderer injects a branding overlay element into the container
-      // after init(). We remove it by targeting the known element attributes.
-      // This does NOT modify any library source; it only removes a DOM node
-      // that the library itself appended to our container div.
       this.removeBranding()
 
-      // ── 3. Scene ──────────────────────────────────────────
       this.world.scene.setup()
       this.world.scene.three.background = new THREE.Color(0x070B0F)
-
       this.world.scene.three.add(new THREE.AmbientLight(0xffffff, 0.5))
 
       const sun = new THREE.DirectionalLight(0xffffff, 1.2)
@@ -99,14 +108,10 @@ export class ViewerEngine {
       fill.position.set(-10, 5, -10)
       this.world.scene.three.add(fill)
 
-      this.world.scene.three.add(
-        new THREE.GridHelper(100, 100, 0x1C2128, 0x1C2128)
-      )
+      this.world.scene.three.add(new THREE.GridHelper(100, 100, 0x1C2128, 0x1C2128))
 
-      // ── 4. Camera default position ────────────────────────
       this.world.camera.controls.setLookAt(12, 14, 18, 0, 0, 0)
 
-      // ── 5. FragmentsManager ───────────────────────────────
       this.fragmentsManager = this.components.get(OBC.FragmentsManager)
 
       try {
@@ -135,7 +140,6 @@ export class ViewerEngine {
         this.loadedModels.push(model)
       })
 
-      // ── 6. IfcLoader ──────────────────────────────────────
       this.ifcLoader = this.components.get(OBC.IfcLoader)
       await this.ifcLoader.setup({
         autoSetWasm: false,
@@ -145,10 +149,8 @@ export class ViewerEngine {
         },
       })
 
-      // ── 7. Click / pick handler ───────────────────────────
       this.config.container.addEventListener('click', this.handleClick)
 
-      // ── 8. Resize observer ────────────────────────────────
       this.ro = new ResizeObserver(() => {
         if (!this.isDisposed && this.world?.renderer) {
           this.world.renderer.resize()
@@ -165,81 +167,31 @@ export class ViewerEngine {
     }
   }
 
-  /**
-   * Removes the "That Open Company" branding overlay injected by SimpleRenderer.
-   *
-   * @thatopen/components SimpleRenderer appends a small <div> watermark to
-   * the container element after components.init(). This method removes it by
-   * scanning the container's direct children for the known branding element
-   * (identified by its style characteristics or data attributes).
-   *
-   * We do NOT modify library source — only our own container's DOM children.
-   * Called immediately after components.init() so the element is already present.
-   */
   private removeBranding(): void {
     try {
       const container = this.config.container
-
-      // The branding element is a direct child <div> of the container
-      // with fixed positioning and a low z-index watermark.
-      // OBC v3.x injects it with id="thatopen-logo" or a known class.
-      // We target any of the known selectors defensively.
       const selectors = [
-        '#thatopen-logo',
-        '[id*="thatopen"]',
-        '[class*="thatopen"]',
-        '[id*="that-open"]',
-        '[class*="that-open"]',
-        // Fallback: any anchor linking to thatopen.com injected by the library
-        'a[href*="thatopen.com"]',
+        '#thatopen-logo', '[id*="thatopen"]', '[class*="thatopen"]',
+        '[id*="that-open"]', '[class*="that-open"]', 'a[href*="thatopen.com"]',
       ]
-
       for (const selector of selectors) {
-        container.querySelectorAll(selector).forEach(el => {
-          el.remove()
-          console.log(`[ViewerEngine] Removed branding element matching: ${selector}`)
-        })
+        container.querySelectorAll(selector).forEach(el => el.remove())
       }
-
-      // Also scan direct children for any <div> or <a> injected after the canvas
-      // that links to the That Open Company website
       Array.from(container.children).forEach(child => {
-        const tagName = child.tagName.toLowerCase()
-        if (tagName === 'canvas') return // keep the canvas
-
+        if (child.tagName.toLowerCase() === 'canvas') return
         const html = child.outerHTML.toLowerCase()
-        if (
-          html.includes('thatopen') ||
-          html.includes('that open') ||
-          html.includes('thatopen.com')
-        ) {
+        if (html.includes('thatopen') || html.includes('thatopen.com')) {
           child.remove()
-          console.log('[ViewerEngine] Removed branding element via content scan')
         }
       })
-
-    } catch (err) {
-      // Non-critical: if removal fails the branding may appear but the viewer works
-      console.warn('[ViewerEngine] removeBranding failed:', err)
-    }
+    } catch { /* non-critical */ }
   }
 
-  // ────────────────────────────────────────────────────────
-  // Unloads every currently loaded model and frees all
-  // associated GPU and worker resources.
-  //
-  // model.dispose() is the canonical That Open Engine API:
-  //   - Terminates the worker thread slot for this model
-  //   - Frees shared MaterialManager entries
-  //   - Removes model.object from its parent (the scene)
-  //   - Disposes tile mesh geometries
-  //
-  // Called automatically at the top of loadIFC() so that
-  // loading a second IFC always starts from a clean scene.
-  // Also exposed publicly so callers (IFCUploadZone, Layout)
-  // can clear the scene before showing the upload UI.
-  // ────────────────────────────────────────────────────────
+  // ── Unload ────────────────────────────────────────────────
+
   async unloadAll(): Promise<void> {
+    this.isIsolated = false
+
     if (this.loadedModels.length === 0) return
 
     const toDispose = [...this.loadedModels]
@@ -249,21 +201,256 @@ export class ViewerEngine {
       try {
         await model.dispose()
       } catch (err) {
-        // Dispose errors are non-critical — log and continue
         console.warn('[ViewerEngine] model.dispose() error:', err)
-        // Fallback: manually remove from scene if dispose() failed
-        try {
-          this.world.scene.three.remove(model.object)
-        } catch {
-          // ignore
-        }
+        try { this.world.scene.three.remove(model.object) } catch { /* ignore */ }
       }
     }
   }
 
-  // ────────────────────────────────────────────────────────
-  // Camera fit
-  // ────────────────────────────────────────────────────────
+  // ── Phase 3+: Zoom to object ──────────────────────────────
+
+  /**
+   * Fits the camera to the bounding box of a single IFC object.
+   *
+   * Uses model.getMergedBox(localIds) — the correct v3.4.6 API.
+   * This is resolved by the worker thread from actual geometry data,
+   * so no mesh traversal is required and LOD tiles are handled correctly.
+   *
+   * Previous broken approach: walking model.object children looking for
+   * mesh.userData.expressID — that key does NOT exist in v3.4.6.
+   * Tiles set userData.sampleId / userData.tileId / userData.itemIds (Set<number>).
+   */
+  async zoomToObject(globalId: string): Promise<void> {
+    console.log('[ViewerEngine] zoomToObject — GlobalId:', globalId)
+
+    if (!this.fragmentsManager?.initialized) {
+      console.warn('[ViewerEngine] zoomToObject: FragmentsManager not initialized')
+      return
+    }
+    if (this.loadedModels.length === 0) {
+      console.warn('[ViewerEngine] zoomToObject: no models loaded')
+      return
+    }
+
+    for (const model of this.loadedModels) {
+      const internal = model as unknown as FragmentsModelInternal
+
+      // Step 1: GlobalId → localId
+      let localIds: (number | null)[] = []
+      try {
+        localIds = await internal.getLocalIdsByGuids([globalId])
+      } catch (err) {
+        console.warn('[ViewerEngine] zoomToObject: getLocalIdsByGuids failed', err)
+        continue
+      }
+
+      const localId = localIds[0]
+      console.log('[ViewerEngine] zoomToObject — localId:', localId)
+
+      if (localId === null || localId === undefined) {
+        console.warn('[ViewerEngine] zoomToObject: GlobalId not found in model')
+        continue
+      }
+
+      // Step 2: Get the bounding box directly from the engine (correct API)
+      // getMergedBox is resolved by the worker from actual geometry — no mesh walking
+      let box: THREE.Box3
+      try {
+        box = await internal.getMergedBox([localId])
+        console.log('[ViewerEngine] zoomToObject — bbox:', box.min, box.max, 'isEmpty:', box.isEmpty())
+      } catch (err) {
+        console.warn('[ViewerEngine] zoomToObject: getMergedBox failed', err)
+        // Fallback: fit to whole model
+        box = new THREE.Box3().setFromObject(model.object)
+        console.log('[ViewerEngine] zoomToObject — fallback to model bbox:', box.isEmpty())
+      }
+
+      if (box.isEmpty()) {
+        console.warn('[ViewerEngine] zoomToObject: bounding box is empty — skipping camera move')
+        return
+      }
+
+      // Step 3: Move camera
+      try {
+        await this.world.camera.controls.fitToBox(box, true, {
+          paddingLeft:   0.5,
+          paddingRight:  0.5,
+          paddingTop:    0.5,
+          paddingBottom: 0.5,
+        })
+        console.log('[ViewerEngine] zoomToObject — camera move complete')
+      } catch (err) {
+        console.warn('[ViewerEngine] zoomToObject: fitToBox failed', err)
+      }
+
+      return // first model that contains the object wins
+    }
+  }
+
+  // ── Phase 3+: Isolate objects ─────────────────────────────
+
+  /**
+   * Isolates a set of IFC objects by hiding everything else.
+   * Passing an empty array restores full visibility.
+   *
+   * Uses model.setVisible(localIds, visible): Promise<void>
+   * which is the correct v3.4.6 API.
+   *
+   * Previous broken approach used setVisibility() — that method does
+   * not exist on FragmentsModel in any version of @thatopen/fragments.
+   */
+  async isolateObjects(globalIds: string[]): Promise<void> {
+    console.log('[ViewerEngine] isolateObjects —', globalIds.length, 'GlobalIds')
+
+    if (!this.fragmentsManager?.initialized) {
+      console.warn('[ViewerEngine] isolateObjects: FragmentsManager not initialized')
+      return
+    }
+    if (this.loadedModels.length === 0) {
+      console.warn('[ViewerEngine] isolateObjects: no models loaded')
+      return
+    }
+
+    if (globalIds.length === 0) {
+      console.log('[ViewerEngine] isolateObjects: empty — restoring visibility')
+      await this.restoreVisibility()
+      return
+    }
+
+    this.isIsolated = true
+
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+
+        // Step 1: resolve target GlobalIds → localIds
+        let targetLocalIds: (number | null)[] = []
+        try {
+          targetLocalIds = await internal.getLocalIdsByGuids(globalIds)
+        } catch (err) {
+          console.warn('[ViewerEngine] isolateObjects: getLocalIdsByGuids failed', err)
+          return
+        }
+
+        const targetSet = new Set<number>(
+          targetLocalIds.filter((id): id is number => id !== null && id !== undefined)
+        )
+        console.log('[ViewerEngine] isolateObjects — target localIds:', targetSet.size)
+
+        if (targetSet.size === 0) {
+          console.warn('[ViewerEngine] isolateObjects: no localIds resolved')
+          return
+        }
+
+        // Step 2: hide everything, then show only targets
+        // setVisible(undefined, false) hides ALL items
+        // setVisible(targetArray, true) shows only the targets
+        try {
+          await internal.setVisible(undefined, false)
+          console.log('[ViewerEngine] isolateObjects — hid all items')
+
+          await internal.setVisible(Array.from(targetSet), true)
+          console.log('[ViewerEngine] isolateObjects — showed', targetSet.size, 'items')
+        } catch (err) {
+          console.warn('[ViewerEngine] isolateObjects: setVisible failed', err)
+        }
+      })
+    )
+
+    console.log('[ViewerEngine] isolateObjects — complete')
+  }
+
+  // ── Phase 3: Layer-filter visibility ─────────────────────
+  // These methods use setVisible/resetVisible (correct API).
+
+  async hideObjects(globalIds: string[]): Promise<void> {
+    if (globalIds.length === 0 || !this.fragmentsManager?.initialized) return
+
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+        try {
+          const localIds = await internal.getLocalIdsByGuids(globalIds)
+          const valid    = localIds.filter((id): id is number => id !== null && id !== undefined)
+          if (valid.length === 0) return
+          await internal.setVisible(valid, false)
+        } catch {
+          // Non-critical — suppress
+        }
+      })
+    )
+  }
+
+  async showObjects(globalIds: string[]): Promise<void> {
+    if (globalIds.length === 0 || !this.fragmentsManager?.initialized) return
+
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+        try {
+          const localIds = await internal.getLocalIdsByGuids(globalIds)
+          const valid    = localIds.filter((id): id is number => id !== null && id !== undefined)
+          if (valid.length === 0) return
+          await internal.setVisible(valid, true)
+        } catch {
+          // Suppress
+        }
+      })
+    )
+  }
+
+  async restoreVisibility(): Promise<void> {
+    if (!this.fragmentsManager?.initialized) return
+
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+        try {
+          // resetVisible() restores all items to visible — correct v3.4.6 API
+          await internal.resetVisible()
+        } catch {
+          // Suppress
+        }
+      })
+    )
+
+    this.isIsolated = false
+  }
+
+  // ── Color overrides ───────────────────────────────────────
+
+  applyColorOverrides(overrides: Map<string, string>): void {
+    if (!this.fragmentsManager?.initialized) return
+    this.colorManager.applyOverrides(overrides, this.loadedModels)
+  }
+
+  resetColors(): void {
+    if (!this.fragmentsManager?.initialized) return
+    this.colorManager.resetAll(this.loadedModels)
+  }
+
+  // ── IFC loading ───────────────────────────────────────────
+
+  async loadIFC(buffer: Uint8Array, fileName: string = 'model'): Promise<FRAGS.FragmentsModel> {
+    if (!this.fragmentsManager.initialized) {
+      throw new Error('FragmentsManager not initialized. Ensure /public/worker.mjs exists.')
+    }
+
+    await this.unloadAll()
+
+    try {
+      const model = await this.ifcLoader.load(buffer, true, fileName)
+      await this.fitCameraToModel(model)
+      return model
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to parse IFC file'
+      this.config.onError(msg)
+      throw err
+    }
+  }
+
+  // ── Camera ────────────────────────────────────────────────
+
   private async fitCameraToModel(model: FRAGS.FragmentsModel): Promise<void> {
     try {
       const box = new THREE.Box3()
@@ -292,11 +479,7 @@ export class ViewerEngine {
           c instanceof THREE.DirectionalLight && c.castShadow
         )
         .forEach(sun => {
-          sun.position.set(
-            center.x + maxDim,
-            center.y + maxDim * 2,
-            center.z + maxDim
-          )
+          sun.position.set(center.x + maxDim, center.y + maxDim * 2, center.z + maxDim)
           sun.target.position.copy(center)
           sun.target.updateMatrixWorld()
           sun.shadow.camera.near   = 0.5
@@ -320,12 +503,8 @@ export class ViewerEngine {
     }
   }
 
-  // ────────────────────────────────────────────────────────
-  // Click handler
-  // mouse carries raw client coordinates (e.clientX / e.clientY).
-  // The Fragments library's screenToCast() calls getBoundingClientRect()
-  // on the canvas and converts to NDC internally.
-  // ────────────────────────────────────────────────────────
+  // ── Click handler ─────────────────────────────────────────
+
   private handleClick = async (e: MouseEvent): Promise<void> => {
     if (!this.world || !this.fragmentsManager?.initialized) return
     if (this.loadedModels.length === 0) return
@@ -350,26 +529,19 @@ export class ViewerEngine {
               mouse,
               dom:    domElement as HTMLCanvasElement,
             })
-          } catch {
-            return
-          }
+          } catch { return }
 
           if (!result || result.localId === undefined) return
 
           let guids: (string | null)[] = []
           try {
             guids = await internal.getGuidsByLocalIds([result.localId])
-          } catch {
-            return
-          }
+          } catch { return }
 
           const globalId = guids[0]
           if (typeof globalId !== 'string' || globalId.length === 0) return
 
-          candidates.push({
-            globalId,
-            distance: result.distance ?? Infinity,
-          })
+          candidates.push({ globalId, distance: result.distance ?? Infinity })
         })
       )
 
@@ -386,56 +558,13 @@ export class ViewerEngine {
     }
   }
 
-  /**
-   * Unloads any existing model, then loads the given IFC buffer.
-   * Does NOT call onModelLoaded — that is done by IFCParserService
-   * after extractObjects() completes, ensuring count is never 0.
-   */
-  async loadIFC(
-    buffer:   Uint8Array,
-    fileName: string = 'model'
-  ): Promise<FRAGS.FragmentsModel> {
-    if (!this.fragmentsManager.initialized) {
-      throw new Error(
-        'FragmentsManager not initialized. Ensure /public/worker.mjs exists.'
-      )
-    }
+  // ── Getters ───────────────────────────────────────────────
 
-    // Always start from a clean scene — dispose previous model first
-    await this.unloadAll()
+  getScene(): THREE.Scene         { return this.world.scene.three }
+  getFragmentsManager()           { return this.fragmentsManager }
+  getLoadedModels()               { return this.loadedModels }
 
-    try {
-      const model = await this.ifcLoader.load(buffer, true, fileName)
-      await this.fitCameraToModel(model)
-      return model
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to parse IFC file'
-      this.config.onError(msg)
-      throw err
-    }
-  }
-
-  applyColorOverrides(overrides: Map<string, string>): void {
-    if (!this.fragmentsManager?.initialized) return
-    this.colorManager.applyOverrides(overrides, this.loadedModels)
-  }
-
-  resetColors(): void {
-    if (!this.fragmentsManager?.initialized) return
-    this.colorManager.resetAll(this.loadedModels)
-  }
-
-  getScene(): THREE.Scene {
-    return this.world.scene.three
-  }
-
-  getFragmentsManager(): OBC.FragmentsManager {
-    return this.fragmentsManager
-  }
-
-  getLoadedModels(): FRAGS.FragmentsModel[] {
-    return this.loadedModels
-  }
+  // ── Dispose ───────────────────────────────────────────────
 
   dispose(): void {
     if (this.isDisposed) return
@@ -444,8 +573,6 @@ export class ViewerEngine {
       this.ro?.disconnect()
       this.config.container.removeEventListener('click', this.handleClick)
       this.components.dispose()
-    } catch {
-      // Suppress errors during unmount
-    }
+    } catch { /* suppress */ }
   }
 }

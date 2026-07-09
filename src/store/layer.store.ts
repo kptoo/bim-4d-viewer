@@ -1,10 +1,3 @@
-/**
- * Layer store — owns information layer state and filter state.
- *
- * Phase 1: empty layers (no mock data needed — layers come from DB).
- * Phase 3: will be populated via React Query + Neon API.
- */
-
 import { create } from 'zustand'
 import type { InformationLayer, LayerAssignment } from '../types'
 
@@ -15,8 +8,19 @@ interface LayerState {
   activeFilterIds: string[]
 
   // ── Actions ──────────────────────────────────────────────
+
   setLayers:          (layers: InformationLayer[]) => void
   setAssignments:     (assignments: LayerAssignment[]) => void
+
+  /**
+   * Atomically updates both layers and assignments in one render.
+   * Called by React Query hooks after a successful combined fetch.
+   */
+  syncFromDB: (
+    layers:      InformationLayer[],
+    assignments: LayerAssignment[]
+  ) => void
+
   toggleFilter:       (layerId: string) => void
   clearFilters:       () => void
   getLayerById:       (id: string) => InformationLayer | undefined
@@ -31,6 +35,8 @@ export const useLayerStore = create<LayerState>((set, get) => ({
 
   setLayers:      (layers)      => set({ layers }),
   setAssignments: (assignments) => set({ assignments }),
+
+  syncFromDB: (layers, assignments) => set({ layers, assignments }),
 
   toggleFilter: (layerId) => {
     set(state => {

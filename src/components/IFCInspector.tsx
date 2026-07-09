@@ -1,28 +1,31 @@
-import { useState, useCallback, useMemo, memo } from 'react'
-import { useSelectionStore }   from '../store/selection.store'
-import { useViewerStore }      from '../store/viewer.store'
-import { useActivityStore }    from '../store/activity.store'
-import { useSimulationStore }  from '../store/simulation.store'
-import { useLayerStore }       from '../store/layer.store'
-import { ifcTypeIcon }         from '../utils/ifc.utils'
-import type { Activity, IFCObject, IFCProperty, SimulationStatus } from '../types'
+import {
+  useState, useCallback, useMemo, memo,
+} from 'react'
+import type { ReactNode } from 'react'
+import { useSelectionStore }  from '../store/selection.store'
+import { useViewerStore }     from '../store/viewer.store'
+import { useActivityStore }   from '../store/activity.store'
+import { useLayerStore }      from '../store/layer.store'
+import { useSimulationStore } from '../store/simulation.store'
+import { ifcTypeIcon }        from '../utils/ifc.utils'
+import type { IFCObject, IFCProperty, Activity, SimulationStatus } from '../types'
 
 // ─── Status labels ────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<SimulationStatus, string> = {
-  completed: 'Completed',
-  active:    'In Progress',
   future:    'Upcoming',
+  active:    'Active',
+  completed: 'Completed',
 }
 
-// ─── Collapsible section ──────────────────────────────────────────────────────
+// ─── Section ──────────────────────────────────────────────────────────────────
 
 interface SectionProps {
   title:        string
   defaultOpen?: boolean
-  badge?:       string | number
+  badge?:       number
   accentColor?: string
-  children:     React.ReactNode
+  children:     ReactNode
 }
 
 const Section = memo(function Section({
@@ -57,7 +60,7 @@ const Section = memo(function Section({
 
 interface PropRowProps {
   label:     string
-  value:     React.ReactNode
+  value:     ReactNode
   copyText?: string
   mono?:     boolean
 }
@@ -110,7 +113,6 @@ function PropertyValue({ prop }: { prop: IFCProperty }) {
     )
   }
 
-  // String
   const str = String(value)
   if (str === 'true')  return <span className="insp-bool-chip insp-bool-chip--yes">Yes</span>
   if (str === 'false') return <span className="insp-bool-chip insp-bool-chip--no">No</span>
@@ -182,14 +184,24 @@ function ActivityCard({ activity, status }: { activity: Activity; status: Simula
 // ─── Main inspector ───────────────────────────────────────────────────────────
 
 export default function IFCInspector() {
+  // ── Selection state ────────────────────────────────────────
   const primaryGlobalId        = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds      = useSelectionStore(s => s.selectedGlobalIds)
   const selectedActivityId     = useSelectionStore(s => s.selectedActivityId)
+
+  // ── Domain data ───────────────────────────────────────────
   const getObjectByGlobalId    = useViewerStore(s => s.getObjectByGlobalId)
+  const zoomToObject           = useViewerStore(s => s.zoomToObject)
+  const isolateObjects         = useViewerStore(s => s.isolateObjects)
   const getActivitiesForObject = useActivityStore(s => s.getActivitiesForObject)
   const getActivityById        = useActivityStore(s => s.getActivityById)
   const getLayersForObject     = useLayerStore(s => s.getLayersForObject)
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
+
+  // ── Isolation toggle state ─────────────────────────────────
+  // Tracks whether the current view is in isolation mode.
+  const [isIsolated, setIsIsolated] = useState(false)
 
   const ifcObject: IFCObject | undefined | null = primaryGlobalId
     ? getObjectByGlobalId(primaryGlobalId)
@@ -208,7 +220,7 @@ export default function IFCInspector() {
     ? (frames.get(ifcObject.globalId)?.status ?? 'future')
     : 'future'
 
-  // ── Group and sort property sets ─────────────────────────────────────────
+  // ── Group and sort property sets ──────────────────────────
   const { psetNames, psetMap } = useMemo(() => {
     if (!ifcObject) return { psetNames: [], psetMap: new Map<string, IFCProperty[]>() }
 
@@ -219,11 +231,6 @@ export default function IFCInspector() {
       map.set(prop.set, arr)
     }
 
-    // Sort order:
-    //   0 — BaseQuantities (canonical quantity set)
-    //   1 — Qto_*  (quantity sets)
-    //   2 — Pset_* (standard property sets)
-    //   3 — everything else (custom / vendor)
     const names = Array.from(map.keys()).sort((a, b) => {
       const rank = (n: string) =>
         n === 'BaseQuantities'  ? 0 :
@@ -235,7 +242,42 @@ export default function IFCInspector() {
     return { psetNames: names, psetMap: map }
   }, [ifcObject])
 
-  // ── Empty state ───────────────────────────────────────────────────────────
+  // ── Action handlers ───────────────────────────────────────
+
+  const handleZoom = useCallback(() => {
+    if (!ifcObject || !zoomToObject) return
+    console.log('[IFCInspector] Zoom to', ifcObject.globalId)
+    zoomToObject(ifcObject.globalId)
+  }, [ifcObject, zoomToObject])
+
+  const handleIsolate = useCallback(() => {
+    if (!ifcObject || !isolateObjects) return
+
+    if (isIsolated) {
+      // Second press — restore full visibility
+      console.log('[IFCInspector] Restore visibility (end isolation)')
+      isolateObjects([])
+      setIsIsolated(false)
+    } else {
+      // First press — isolate the selected objects
+      // If multiple objects are selected, isolate all of them
+      const targets = selectedGlobalIds.size > 1
+        ? Array.from(selectedGlobalIds)
+        : [ifcObject.globalId]
+      console.log('[IFCInspector] Isolate', targets)
+      isolateObjects(targets)
+      setIsIsolated(true)
+    }
+  }, [ifcObject, isolateObjects, isIsolated, selectedGlobalIds])
+
+  // Reset isolation state when selection changes
+  // so the button label stays consistent
+  const prevGlobalId = primaryGlobalId
+  if (isIsolated && prevGlobalId !== primaryGlobalId) {
+    setIsIsolated(false)
+  }
+
+  // ── Empty state ───────────────────────────────────────────
   if (!ifcObject) {
     return (
       <div className="insp-empty">
@@ -345,17 +387,35 @@ export default function IFCInspector() {
       <div className="insp-actions">
         <button
           className="action-btn"
-          onClick={() => console.log('Zoom to', ifcObject.globalId)}
-        >🔍 Zoom To</button>
+          onClick={handleZoom}
+          disabled={!zoomToObject}
+          title={zoomToObject ? 'Zoom camera to this element' : 'Viewer not ready'}
+        >
+          🔍 Zoom To
+        </button>
         <button
-          className="action-btn"
-          onClick={() => console.log('Isolate', ifcObject.globalId)}
-        >💡 Isolate</button>
+          className={`action-btn${isIsolated ? ' action-btn--active' : ''}`}
+          onClick={handleIsolate}
+          disabled={!isolateObjects}
+          title={
+            !isolateObjects
+              ? 'Viewer not ready'
+              : isIsolated
+                ? 'Restore full model visibility'
+                : selectedGlobalIds.size > 1
+                  ? `Isolate ${selectedGlobalIds.size} selected elements`
+                  : 'Hide all other elements'
+          }
+        >
+          {isIsolated ? '👁 Show All' : '💡 Isolate'}
+        </button>
         <button
           className="action-btn"
           disabled={!linkedActivity}
           onClick={() => console.log('Show activity', linkedActivity?.id)}
-        >📋 Activity</button>
+        >
+          📋 Activity
+        </button>
       </div>
 
     </div>

@@ -5002,6 +5002,436 @@ a[href*="thatopen.com"] {
   pointer-events: none !important;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   OBJECT EXPLORER — additions to existing .tree-* rules
+   Append to end of src/App.css
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Stats / mode bar ──────────────────────────────────────────────────── */
+.tree-stats-bar {
+  display:         flex;
+  align-items:     center;
+  gap:             8px;
+  padding:         3px 10px;
+  background:      var(--bg-secondary);
+  border-bottom:   1px solid var(--border-color);
+  flex-shrink:     0;
+  min-height:      22px;
+}
+
+.tree-stats-count {
+  flex:        1;
+  font-size:   10px;
+  color:       var(--text-secondary);
+  font-weight: 500;
+}
+
+.tree-stats-matches {
+  font-size:   10px;
+  color:       var(--accent-blue);
+  font-weight: 600;
+}
+
+.tree-stats-mode {
+  font-size:   10px;
+  color:       var(--accent-green);
+  font-weight: 600;
+}
+
+.tree-stats-mode--fallback {
+  color: var(--text-secondary);
+}
+
+/* ─── Virtual scroll — GPU layer for smooth large-list scrolling ────────── */
+.tree-scroll {
+  will-change: transform;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROPERTIES INSPECTOR — complete redesign
+   All classes prefixed .insp-* to avoid collision with old .inspector-*
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.insp-body {
+  height:         100%;
+  overflow-y:     auto;
+  overflow-x:     hidden;
+  display:        flex;
+  flex-direction: column;
+}
+
+/* ─── Empty state ───────────────────────────────────────────────────────── */
+.insp-empty {
+  height:          100%;
+  display:         flex;
+  flex-direction:  column;
+  align-items:     center;
+  justify-content: center;
+  gap:             12px;
+  padding:         24px;
+  text-align:      center;
+}
+
+.insp-empty-icon { font-size: 36px; opacity: 0.25; }
+
+.insp-empty-text {
+  font-size:   12px;
+  line-height: 1.6;
+  color:       var(--text-secondary);
+  max-width:   180px;
+}
+
+/* ─── Element header card ───────────────────────────────────────────────── */
+.insp-header-card {
+  display:       flex;
+  align-items:   flex-start;
+  gap:           10px;
+  padding:       12px 14px 10px;
+  background:    var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink:   0;
+}
+
+.insp-header-icon {
+  font-size:   24px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top:  1px;
+}
+
+.insp-header-info {
+  flex:           1;
+  min-width:      0;
+  display:        flex;
+  flex-direction: column;
+  gap:            5px;
+}
+
+.insp-header-name {
+  font-size:   13px;
+  font-weight: 600;
+  color:       var(--text-primary);
+  word-break:  break-all;
+  line-height: 1.3;
+}
+
+.insp-header-type {
+  display:     flex;
+  align-items: center;
+  gap:         6px;
+  flex-wrap:   wrap;
+}
+
+/* ─── IFC type chip ─────────────────────────────────────────────────────── */
+.insp-type-chip {
+  display:       inline-flex;
+  align-items:   center;
+  background:    rgba(47, 107, 255, 0.12);
+  border:        1px solid rgba(47, 107, 255, 0.3);
+  border-radius: 10px;
+  padding:       1px 8px;
+  font-size:     10px;
+  font-weight:   600;
+  color:         var(--accent-blue);
+  white-space:   nowrap;
+}
+
+/* ─── Collapsible section ───────────────────────────────────────────────── */
+.insp-section {
+  flex-shrink:   0;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.insp-section-header {
+  display:        flex;
+  align-items:    center;
+  gap:            6px;
+  width:          100%;
+  background:     none;
+  border:         none;
+  border-left:    2px solid transparent;
+  padding:        7px 14px 7px 10px;
+  cursor:         pointer;
+  text-align:     left;
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition:     background 0.1s, border-left-color 0.15s;
+}
+
+.insp-section-header:hover {
+  background: rgba(47, 107, 255, 0.05);
+}
+
+.insp-section-title {
+  flex:           1;
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.insp-section-badge {
+  font-size:     10px;
+  color:         var(--text-secondary);
+  background:    var(--bg-panel);
+  border:        1px solid var(--border-color);
+  border-radius: 8px;
+  padding:       1px 6px;
+  font-weight:   600;
+}
+
+.insp-section-body { padding: 0 0 4px; }
+
+/* ─── Shared chevron ────────────────────────────────────────────────────── */
+.insp-chevron {
+  font-size:   8px;
+  color:       var(--text-secondary);
+  transition:  transform 0.15s;
+  flex-shrink: 0;
+}
+
+.insp-chevron--open { transform: rotate(90deg); }
+
+/* ─── Property row ──────────────────────────────────────────────────────── */
+.insp-prop-row {
+  display:       flex;
+  align-items:   baseline;
+  gap:           8px;
+  padding:       4px 14px;
+  min-height:    24px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.25);
+}
+
+.insp-prop-row:last-child { border-bottom: none; }
+
+.insp-prop-key {
+  font-size:   11px;
+  color:       var(--text-secondary);
+  min-width:   110px;
+  max-width:   110px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.insp-prop-val {
+  font-size:   12px;
+  color:       var(--text-primary);
+  flex:        1;
+  min-width:   0;
+  word-break:  break-word;
+  display:     flex;
+  align-items: baseline;
+  gap:         4px;
+  line-height: 1.4;
+}
+
+.insp-prop-val--mono {
+  font-family: monospace;
+  font-size:   11px;
+}
+
+/* ─── GlobalId truncated display ────────────────────────────────────────── */
+.insp-val-guid {
+  overflow:       hidden;
+  text-overflow:  ellipsis;
+  white-space:    nowrap;
+  max-width:      140px;
+  display:        inline-block;
+  font-family:    monospace;
+  font-size:      11px;
+  vertical-align: middle;
+}
+
+/* ─── Copy button ───────────────────────────────────────────────────────── */
+.insp-copy-btn {
+  background:  none;
+  border:      none;
+  cursor:      pointer;
+  font-size:   11px;
+  padding:     0 2px;
+  line-height: 1;
+  opacity:     0.4;
+  transition:  opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.insp-copy-btn:hover { opacity: 1; }
+
+/* ─── Value types ───────────────────────────────────────────────────────── */
+.insp-val-null   { color: var(--text-secondary); opacity: 0.5; }
+
+.insp-val-number {
+  font-family: monospace;
+  font-size:   11px;
+  color:       #7FDBFF;
+  font-weight: 500;
+}
+
+.insp-val-unit {
+  font-size:   10px;
+  color:       var(--text-secondary);
+}
+
+.insp-val-string { white-space: pre-wrap; word-break: break-word; }
+
+/* ─── Boolean chip ──────────────────────────────────────────────────────── */
+.insp-bool-chip {
+  display:       inline-flex;
+  align-items:   center;
+  border-radius: 8px;
+  padding:       1px 8px;
+  font-size:     10px;
+  font-weight:   700;
+}
+
+.insp-bool-chip--yes {
+  background: rgba(46, 204, 113, 0.12);
+  border:     1px solid rgba(46, 204, 113, 0.3);
+  color:      #2ECC71;
+}
+
+.insp-bool-chip--no {
+  background: rgba(231, 76, 60, 0.10);
+  border:     1px solid rgba(231, 76, 60, 0.25);
+  color:      #E74C3C;
+}
+
+/* ─── Property set groups ───────────────────────────────────────────────── */
+.insp-psets       { padding: 0 0 4px; }
+
+.insp-pset        { border-top: 1px solid rgba(48, 54, 61, 0.4); }
+.insp-pset:first-child { border-top: none; }
+
+.insp-pset-header {
+  display:     flex;
+  align-items: center;
+  gap:         6px;
+  width:       100%;
+  background:  none;
+  border:      none;
+  padding:     5px 14px 5px 20px;
+  cursor:      pointer;
+  text-align:  left;
+  color:       var(--text-primary);
+  font-size:   11px;
+  font-weight: 600;
+  transition:  background 0.1s;
+}
+
+.insp-pset-header:hover { background: rgba(47, 107, 255, 0.06); }
+
+/* Quantity sets get gold tint to distinguish from property sets */
+.insp-pset-header--qto { color: var(--accent-gold); }
+
+.insp-pset-name {
+  flex:          1;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+  font-family:   monospace;
+  font-size:     11px;
+}
+
+.insp-pset-count {
+  font-size:   10px;
+  color:       var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.insp-pset-body { padding: 0 0 4px; }
+
+.insp-prop-row--pset {
+  padding-left:  28px;
+  padding-right: 14px;
+}
+
+.insp-prop-key--pset {
+  font-size: 11px;
+  min-width: 130px;
+  max-width: 130px;
+}
+
+.insp-prop-val--pset { font-size: 11px; }
+
+/* ─── Activity card ─────────────────────────────────────────────────────── */
+.insp-activity-card {
+  display:     flex;
+  align-items: flex-start;
+  gap:         10px;
+  padding:     8px 14px;
+}
+
+.insp-activity-color {
+  width:         4px;
+  min-height:    40px;
+  border-radius: 2px;
+  flex-shrink:   0;
+  align-self:    stretch;
+}
+
+.insp-activity-info {
+  flex:           1;
+  min-width:      0;
+  display:        flex;
+  flex-direction: column;
+  gap:            3px;
+}
+
+.insp-activity-name  { font-size: 13px; font-weight: 600; word-break: break-word; }
+.insp-activity-dates { font-size: 11px; color: var(--text-secondary); }
+
+.insp-activity-meta {
+  display:     flex;
+  align-items: center;
+  gap:         6px;
+  font-size:   11px;
+  color:       var(--text-secondary);
+  flex-wrap:   wrap;
+}
+
+/* ─── Layers list ───────────────────────────────────────────────────────── */
+.insp-layers {
+  display:        flex;
+  flex-direction: column;
+  gap:            3px;
+  padding:        4px 14px 6px;
+}
+
+.insp-layer-row {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  font-size:   11px;
+}
+
+.insp-layer-dot {
+  width:         8px;
+  height:        8px;
+  border-radius: 50%;
+  flex-shrink:   0;
+}
+
+.insp-layer-name { font-size: 11px; color: var(--text-primary); }
+
+/* ─── Quick actions ─────────────────────────────────────────────────────── */
+.insp-actions {
+  display:     flex;
+  gap:         7px;
+  padding:     10px 14px;
+  flex-shrink: 0;
+  margin-top:  auto;
+  border-top:  1px solid var(--border-color);
+}
+
+.action-btn:disabled {
+  opacity:        0.35;
+  cursor:         default;
+  pointer-events: none;
+}
+
 
 ====================================================================================================
 FILE: src\components\GanttPanel.tsx
@@ -5141,14 +5571,16 @@ export default function GanttPanel() {
 FILE: src\components\IFCInspector.tsx
 ====================================================================================================
 
-import { useState } from 'react'
-import { useSelectionStore } from '../store/selection.store'
-import { useViewerStore } from '../store/viewer.store'
-import { useActivityStore } from '../store/activity.store'
-import { useSimulationStore } from '../store/simulation.store'
-import { useLayerStore } from '../store/layer.store'
-import { ifcTypeIcon } from '../utils/ifc.utils'
-import type { Activity, IFCProperty, SimulationStatus } from '../types'
+import { useState, useCallback, useMemo, memo } from 'react'
+import { useSelectionStore }   from '../store/selection.store'
+import { useViewerStore }      from '../store/viewer.store'
+import { useActivityStore }    from '../store/activity.store'
+import { useSimulationStore }  from '../store/simulation.store'
+import { useLayerStore }       from '../store/layer.store'
+import { ifcTypeIcon }         from '../utils/ifc.utils'
+import type { Activity, IFCObject, IFCProperty, SimulationStatus } from '../types'
+
+// ─── Status labels ────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<SimulationStatus, string> = {
   completed: 'Completed',
@@ -5156,37 +5588,138 @@ const STATUS_LABEL: Record<SimulationStatus, string> = {
   future:    'Upcoming',
 }
 
-// ─── Property set group (collapsible) ────────────────────────────────────────
+// ─── Collapsible section ──────────────────────────────────────────────────────
 
-interface PsetGroupProps {
-  psetName:   string
-  properties: IFCProperty[]
+interface SectionProps {
+  title:        string
+  defaultOpen?: boolean
+  badge?:       string | number
+  accentColor?: string
+  children:     React.ReactNode
 }
 
-function PsetGroup({ psetName, properties }: PsetGroupProps) {
-  const [open, setOpen] = useState(true)
+const Section = memo(function Section({
+  title, defaultOpen = true, badge, accentColor, children,
+}: SectionProps) {
+  const [open, setOpen] = useState(defaultOpen)
 
   return (
-    <div className="inspector-pset">
+    <div className="insp-section">
       <button
-        className="inspector-pset-header"
+        className="insp-section-header"
+        style={accentColor ? { borderLeftColor: accentColor } : undefined}
         onClick={() => setOpen(o => !o)}
-        title={open ? 'Collapse' : 'Expand'}
       >
-        <span className="inspector-pset-chevron">{open ? '▾' : '▸'}</span>
-        <span className="inspector-pset-name">{psetName}</span>
-        <span className="inspector-pset-count">({properties.length})</span>
+        <span className={`insp-chevron${open ? ' insp-chevron--open' : ''}`}>▶</span>
+        <span className="insp-section-title">{title}</span>
+        {badge !== undefined && (
+          <span className="insp-section-badge">{badge}</span>
+        )}
       </button>
 
       {open && (
-        <div className="inspector-pset-body">
+        <div className="insp-section-body">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+})
+
+// ─── Property row ─────────────────────────────────────────────────────────────
+
+interface PropRowProps {
+  label:     string
+  value:     React.ReactNode
+  copyText?: string
+  mono?:     boolean
+}
+
+function PropRow({ label, value, copyText, mono }: PropRowProps) {
+  const handleCopy = useCallback(() => {
+    if (copyText) navigator.clipboard.writeText(copyText)
+  }, [copyText])
+
+  return (
+    <div className="insp-prop-row">
+      <span className="insp-prop-key">{label}</span>
+      <span className={`insp-prop-val${mono ? ' insp-prop-val--mono' : ''}`}>
+        {value}
+        {copyText && (
+          <button
+            className="insp-copy-btn"
+            onClick={handleCopy}
+            title={`Copy ${label}`}
+          >📋</button>
+        )}
+      </span>
+    </div>
+  )
+}
+
+// ─── Property value renderer ──────────────────────────────────────────────────
+
+function PropertyValue({ prop }: { prop: IFCProperty }) {
+  const { value, unit } = prop
+
+  if (value === null || value === undefined) {
+    return <em className="insp-val-null">—</em>
+  }
+
+  if (typeof value === 'boolean') {
+    return (
+      <span className={`insp-bool-chip${value ? ' insp-bool-chip--yes' : ' insp-bool-chip--no'}`}>
+        {value ? 'Yes' : 'No'}
+      </span>
+    )
+  }
+
+  if (typeof value === 'number') {
+    return (
+      <span className="insp-val-number">
+        {value}
+        {unit && <span className="insp-val-unit"> {unit}</span>}
+      </span>
+    )
+  }
+
+  // String
+  const str = String(value)
+  if (str === 'true')  return <span className="insp-bool-chip insp-bool-chip--yes">Yes</span>
+  if (str === 'false') return <span className="insp-bool-chip insp-bool-chip--no">No</span>
+
+  return <span className="insp-val-string">{str}{unit && <span className="insp-val-unit"> {unit}</span>}</span>
+}
+
+// ─── Pset section ────────────────────────────────────────────────────────────
+
+interface PsetSectionProps {
+  psetName:   string
+  properties: IFCProperty[]
+  isQto:      boolean
+}
+
+const PsetSection = memo(function PsetSection({ psetName, properties, isQto }: PsetSectionProps) {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <div className="insp-pset">
+      <button
+        className={`insp-pset-header${isQto ? ' insp-pset-header--qto' : ''}`}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className={`insp-chevron${open ? ' insp-chevron--open' : ''}`}>▶</span>
+        <span className="insp-pset-name">{psetName}</span>
+        <span className="insp-pset-count">({properties.length})</span>
+      </button>
+
+      {open && (
+        <div className="insp-pset-body">
           {properties.map((p, i) => (
-            <div className="prop-row prop-row--pset" key={`${p.name}-${i}`}>
-              <span className="prop-key prop-key--pset">{p.name}</span>
-              <span className="prop-val prop-val--pset">
-                {p.value === null || p.value === undefined
-                  ? <em style={{ opacity: 0.4 }}>—</em>
-                  : String(p.value)}
+            <div className="insp-prop-row insp-prop-row--pset" key={`${p.name}-${i}`}>
+              <span className="insp-prop-key insp-prop-key--pset">{p.name}</span>
+              <span className="insp-prop-val insp-prop-val--pset">
+                <PropertyValue prop={p} />
               </span>
             </div>
           ))}
@@ -5194,9 +5727,32 @@ function PsetGroup({ psetName, properties }: PsetGroupProps) {
       )}
     </div>
   )
+})
+
+// ─── Activity card ────────────────────────────────────────────────────────────
+
+function ActivityCard({ activity, status }: { activity: Activity; status: SimulationStatus }) {
+  return (
+    <div className="insp-activity-card">
+      <div className="insp-activity-color" style={{ background: activity.color }} />
+      <div className="insp-activity-info">
+        <div className="insp-activity-name" style={{ color: activity.color }}>
+          {activity.name}
+        </div>
+        <div className="insp-activity-dates">
+          {activity.startDate} → {activity.endDate}
+        </div>
+        <div className="insp-activity-meta">
+          {activity.linkedGlobalIds.length} element
+          {activity.linkedGlobalIds.length !== 1 ? 's' : ''} ·{' '}
+          <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
-// ─── Main Inspector ───────────────────────────────────────────────────────────
+// ─── Main inspector ───────────────────────────────────────────────────────────
 
 export default function IFCInspector() {
   const primaryGlobalId        = useSelectionStore(s => s.primaryGlobalId)
@@ -5208,200 +5764,173 @@ export default function IFCInspector() {
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
 
-  const ifcObject     = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
+  const ifcObject: IFCObject | undefined | null = primaryGlobalId
+    ? getObjectByGlobalId(primaryGlobalId)
+    : null
+
   const linkedActivity: Activity | undefined = selectedActivityId
     ? getActivityById(selectedActivityId)
     : ifcObject
       ? getActivitiesForObject(ifcObject.globalId)[0]
       : undefined
 
-  const assignedLayers = ifcObject
-    ? getLayersForObject(ifcObject.globalId)
-    : []
+  const assignedLayers = ifcObject ? getLayersForObject(ifcObject.globalId) : []
 
   const frames = computeAllFrames(activities)
-  const status = ifcObject
+  const status: SimulationStatus = ifcObject
     ? (frames.get(ifcObject.globalId)?.status ?? 'future')
     : 'future'
 
-  // ── Empty state ───────────────────────────────────────────
+  // ── Group and sort property sets ─────────────────────────────────────────
+  const { psetNames, psetMap } = useMemo(() => {
+    if (!ifcObject) return { psetNames: [], psetMap: new Map<string, IFCProperty[]>() }
+
+    const map = new Map<string, IFCProperty[]>()
+    for (const prop of ifcObject.properties) {
+      const arr = map.get(prop.set) ?? []
+      arr.push(prop)
+      map.set(prop.set, arr)
+    }
+
+    // Sort order:
+    //   0 — BaseQuantities (canonical quantity set)
+    //   1 — Qto_*  (quantity sets)
+    //   2 — Pset_* (standard property sets)
+    //   3 — everything else (custom / vendor)
+    const names = Array.from(map.keys()).sort((a, b) => {
+      const rank = (n: string) =>
+        n === 'BaseQuantities'  ? 0 :
+        n.startsWith('Qto_')   ? 1 :
+        n.startsWith('Pset_')  ? 2 : 3
+      return rank(a) - rank(b) || a.localeCompare(b)
+    })
+
+    return { psetNames: names, psetMap: map }
+  }, [ifcObject])
+
+  // ── Empty state ───────────────────────────────────────────────────────────
   if (!ifcObject) {
     return (
-      <div className="inspector-body">
-        <div className="inspector-empty">
-          <div className="inspector-empty-icon">🏗</div>
-          <p>Select an element in the 3D viewer or click a task in the Gantt chart</p>
-        </div>
+      <div className="insp-empty">
+        <div className="insp-empty-icon">🏗</div>
+        <p className="insp-empty-text">
+          Select an element in the 3D viewer<br />
+          or click a task in the Gantt chart
+        </p>
       </div>
     )
   }
 
   const typeIcon = ifcTypeIcon(ifcObject.type)
-  const copyToClipboard = (text: string) => navigator.clipboard.writeText(text)
-
-  // ── Group properties by Pset name ────────────────────────
-  const psetMap = new Map<string, IFCProperty[]>()
-  for (const prop of ifcObject.properties) {
-    const group = psetMap.get(prop.set) ?? []
-    group.push(prop)
-    psetMap.set(prop.set, group)
-  }
-  const psetNames = Array.from(psetMap.keys()).sort()
 
   return (
-    <div className="inspector-body">
-      <div className="inspector-card">
+    <div className="insp-body">
 
-        {/* ── Type header ─────────────────────────────────── */}
-        <div className="inspector-type-header">
-          <div className="inspector-type-icon">{typeIcon}</div>
-          <div className="inspector-type-info">
-            <div className="inspector-element-name">{ifcObject.name}</div>
-            <div className="inspector-type-badge">{ifcObject.type}</div>
+      {/* ── Element Header ───────────────────────────────────── */}
+      <div className="insp-header-card">
+        <div className="insp-header-icon">{typeIcon}</div>
+        <div className="insp-header-info">
+          <div className="insp-header-name">{ifcObject.name}</div>
+          <div className="insp-header-type">
+            <span className="insp-type-chip">{ifcObject.type}</span>
+            <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
           </div>
-          <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
         </div>
-
-        {/* ── Core IFC attributes ──────────────────────────── */}
-        <div className="inspector-section-title">IFC Attributes</div>
-        <div className="inspector-props">
-
-          <div className="prop-row">
-            <span className="prop-key">Global ID</span>
-            <span className="prop-val">
-              <span className="prop-val-text" title={ifcObject.globalId}>
-                {ifcObject.globalId}
-              </span>
-              <button
-                className="copy-btn"
-                onClick={() => copyToClipboard(ifcObject.globalId)}
-                title="Copy GlobalId"
-              >
-                📋
-              </button>
-            </span>
-          </div>
-
-          <div className="prop-row">
-            <span className="prop-key">Name</span>
-            <span className="prop-val">{ifcObject.name}</span>
-          </div>
-
-          <div className="prop-row">
-            <span className="prop-key">IFC Type</span>
-            <span className="prop-val">
-              <span className="inspector-type-badge">{ifcObject.type}</span>
-            </span>
-          </div>
-
-          {ifcObject.expressId !== undefined && (
-            <div className="prop-row">
-              <span className="prop-key">Express ID</span>
-              <span className="prop-val">{ifcObject.expressId}</span>
-            </div>
-          )}
-
-          {ifcObject.tag && (
-            <div className="prop-row">
-              <span className="prop-key">Tag</span>
-              <span className="prop-val">{ifcObject.tag}</span>
-            </div>
-          )}
-
-          {ifcObject.description && (
-            <div className="prop-row">
-              <span className="prop-key">Description</span>
-              <span className="prop-val">{ifcObject.description}</span>
-            </div>
-          )}
-
-          {ifcObject.objectType && (
-            <div className="prop-row">
-              <span className="prop-key">Object Type</span>
-              <span className="prop-val">{ifcObject.objectType}</span>
-            </div>
-          )}
-
-          {ifcObject.predefinedType && (
-            <div className="prop-row">
-              <span className="prop-key">Predefined Type</span>
-              <span className="prop-val">{ifcObject.predefinedType}</span>
-            </div>
-          )}
-
-          <div className="prop-row">
-            <span className="prop-key">Status</span>
-            <span className="prop-val">
-              <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
-            </span>
-          </div>
-
-          {/* Information layers */}
-          {assignedLayers.length > 0 && (
-            <div className="prop-row">
-              <span className="prop-key">Layers</span>
-              <span className="prop-val" style={{ flexWrap: 'wrap', gap: 4 }}>
-                {assignedLayers.map(layer => (
-                  <span
-                    key={layer.id}
-                    className="inspector-type-badge"
-                    style={{ background: `${layer.color}22`, borderColor: layer.color, color: layer.color }}
-                  >
-                    {layer.name}
-                  </span>
-                ))}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* ── Property Sets ────────────────────────────────── */}
-        {psetNames.length > 0 && (
-          <>
-            <div className="inspector-section-title">Property Sets</div>
-            <div className="inspector-psets">
-              {psetNames.map(name => (
-                <PsetGroup
-                  key={name}
-                  psetName={name}
-                  properties={psetMap.get(name)!}
-                />
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* ── Linked activity ──────────────────────────────── */}
-        {linkedActivity && (
-          <div className="inspector-task-card">
-            <div className="inspector-task-title">Linked Construction Activity</div>
-            <div className="inspector-task-name" style={{ color: linkedActivity.color }}>
-              {linkedActivity.name}
-            </div>
-            <div className="inspector-task-dates">
-              📅 {linkedActivity.startDate} → {linkedActivity.endDate}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-              {linkedActivity.linkedGlobalIds.length} element
-              {linkedActivity.linkedGlobalIds.length !== 1 ? 's' : ''} in this activity
-            </div>
-          </div>
-        )}
-
-        {/* ── Quick actions ────────────────────────────────── */}
-        <div className="inspector-actions">
-          <button className="action-btn" onClick={() => console.log('Zoom to', ifcObject.globalId)}>
-            🔍 Zoom To
-          </button>
-          <button className="action-btn" onClick={() => console.log('Isolate', ifcObject.globalId)}>
-            💡 Isolate
-          </button>
-          <button className="action-btn" onClick={() => console.log('Show activity', linkedActivity?.id)}>
-            📋 Activity
-          </button>
-        </div>
-
       </div>
+
+      {/* ── Identity Data ─────────────────────────────────────── */}
+      <Section title="Identity Data" defaultOpen={true}>
+        <PropRow
+          label="Global ID"
+          value={
+            <span className="insp-val-guid" title={ifcObject.globalId}>
+              {ifcObject.globalId}
+            </span>
+          }
+          copyText={ifcObject.globalId}
+          mono
+        />
+        <PropRow label="Name"     value={ifcObject.name || <em className="insp-val-null">—</em>} />
+        <PropRow label="IFC Type" value={<span className="insp-type-chip">{ifcObject.type}</span>} />
+        {ifcObject.expressId !== undefined && (
+          <PropRow label="Express ID" value={ifcObject.expressId} mono />
+        )}
+        {ifcObject.objectType && (
+          <PropRow label="Object Type" value={ifcObject.objectType} />
+        )}
+        {ifcObject.predefinedType && (
+          <PropRow label="Predefined Type" value={ifcObject.predefinedType} />
+        )}
+        {ifcObject.tag && (
+          <PropRow label="Tag" value={ifcObject.tag} mono />
+        )}
+        {ifcObject.description && (
+          <PropRow label="Description" value={ifcObject.description} />
+        )}
+      </Section>
+
+      {/* ── Property Sets ─────────────────────────────────────── */}
+      {psetNames.length > 0 && (
+        <Section
+          title="Property Sets"
+          defaultOpen={true}
+          badge={psetNames.length}
+        >
+          <div className="insp-psets">
+            {psetNames.map(name => (
+              <PsetSection
+                key={name}
+                psetName={name}
+                properties={psetMap.get(name)!}
+                isQto={name === 'BaseQuantities' || name.startsWith('Qto_')}
+              />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Construction Activity ─────────────────────────────── */}
+      {linkedActivity && (
+        <Section title="Construction Activity" defaultOpen={true} accentColor="#E67E22">
+          <ActivityCard activity={linkedActivity} status={status} />
+        </Section>
+      )}
+
+      {/* ── Information Layers ────────────────────────────────── */}
+      {assignedLayers.length > 0 && (
+        <Section
+          title="Information Layers"
+          defaultOpen={true}
+          badge={assignedLayers.length}
+        >
+          <div className="insp-layers">
+            {assignedLayers.map(layer => (
+              <div key={layer.id} className="insp-layer-row">
+                <span className="insp-layer-dot" style={{ background: layer.color }} />
+                <span className="insp-layer-name">{layer.name}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Quick Actions ─────────────────────────────────────── */}
+      <div className="insp-actions">
+        <button
+          className="action-btn"
+          onClick={() => console.log('Zoom to', ifcObject.globalId)}
+        >🔍 Zoom To</button>
+        <button
+          className="action-btn"
+          onClick={() => console.log('Isolate', ifcObject.globalId)}
+        >💡 Isolate</button>
+        <button
+          className="action-btn"
+          disabled={!linkedActivity}
+          onClick={() => console.log('Show activity', linkedActivity?.id)}
+        >📋 Activity</button>
+      </div>
+
     </div>
   )
 }
@@ -5411,394 +5940,622 @@ export default function IFCInspector() {
 FILE: src\components\IFCObjectTree.tsx
 ====================================================================================================
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useViewerStore } from '../store/viewer.store'
+import {
+  useState, useEffect, useCallback, useMemo, useRef, memo,
+} from 'react'
+import { useViewerStore }    from '../store/viewer.store'
 import { useSelectionStore } from '../store/selection.store'
-import { ifcTypeIcon } from '../utils/ifc.utils'
-import type { IFCObject, IFCType } from '../types'
+import { ifcTypeIcon }       from '../utils/ifc.utils'
+import type { IFCObject, IFCSpatialTree, IFCType } from '../types'
 
-// ─── Hierarchy configuration ────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-/**
- * IFC spatial structure types, in hierarchy order.
- * Everything not listed here becomes a leaf "Element" node.
- */
-const SPATIAL_TYPES: IFCType[] = [
-  'IfcProject',
-  'IfcSite',
-  'IfcBuilding',
-  'IfcBuildingStorey',
-  'IfcSpace',
-]
-
-const SPATIAL_TYPE_SET = new Set<string>(SPATIAL_TYPES)
+const ROW_HEIGHT = 26
+const OVERSCAN   = 8
 
 const SPATIAL_ICONS: Record<string, string> = {
-  IfcProject:         '🏗',
-  IfcSite:            '🌍',
-  IfcBuilding:        '🏢',
-  IfcBuildingStorey:  '📐',
-  IfcSpace:           '📦',
+  IfcProject:          '🏗',
+  IfcSite:             '🌍',
+  IfcBuilding:         '🏢',
+  IfcBuildingStorey:   '📐',
+  IfcSpace:            '📦',
+  IfcOpeningElement:   '🔲',
+  IfcVirtualElement:   '🔲',
 }
 
-// ─── Tree node types ─────────────────────────────────────────────────────────
+const UNASSIGNED_KEY = '__unassigned__'
 
-interface TreeNode {
-  id:         string        // globalId or synthetic group id
-  label:      string        // Display name
-  ifcType:    string        // IFC entity type string
-  globalId:   string | null // null for synthetic group nodes
-  children:   TreeNode[]
-  isGroup:    boolean       // true = synthetic group (not a real IFC object)
+// ─── Display node ─────────────────────────────────────────────────────────────
+
+interface DisplayNode {
+  id:       string
+  label:    string
+  ifcType:  string
+  globalId: string | null   // null for synthetic group nodes
+  isGroup:  boolean
+  childIds: string[]
+  parentId: string | null
+  depth:    number
 }
 
-// ─── Tree builder ────────────────────────────────────────────────────────────
+// ─── Build display tree ───────────────────────────────────────────────────────
 
 /**
- * Builds a spatial hierarchy tree from the flat IFCObject[] array.
+ * Converts IFCSpatialTree + IFCObject[] into a flat DisplayNode map.
  *
- * Strategy (without RelationsIndexer, which requires async model access):
- *   1. Split objects into "spatial" (Project/Site/Building/Storey/Space) and "elements"
- *   2. Group spatial objects by type in hierarchy order
- *   3. Group element objects by IFC type under a synthetic "Elements" container
- *   4. Nest everything under the deepest spatial container available
- *
- * This gives a clean, browseable hierarchy from data already in the store.
+ * Prints the full debug summary requested:
+ *   - Relationship graph traversal
+ *   - Detected hierarchy
+ *   - Counts of each relationship type
  */
-function buildTree(objects: IFCObject[]): TreeNode[] {
-  if (objects.length === 0) return []
+function buildDisplayTree(
+  spatialTree: IFCSpatialTree,
+  objectMap:   Map<string, IFCObject>,
+  modelName:   string
+): { nodes: Map<string, DisplayNode>; rootIds: string[] } {
+  const nodes:   Map<string, DisplayNode> = new Map()
+  const rootIds: string[]                 = []
 
-  // Split spatial vs element objects
-  const spatialObjects  = objects.filter(o => SPATIAL_TYPE_SET.has(o.type))
-  const elementObjects  = objects.filter(o => !SPATIAL_TYPE_SET.has(o.type))
+  // ── Counters for debug output ────────────────────────────────────────────
+  let aggregateRelCount   = 0
+  let containmentCount    = 0
+  let openingRelCount     = 0
+  let fillingRelCount     = 0
+  let groupedCategories   = 0
+  let orphanNodeCount     = 0
 
-  // ── Build spatial branch ──────────────────────────────────────────────────
-  // Sort by hierarchy order so Project > Site > Building > Storey > Space
-  const spatialOrdered = [...spatialObjects].sort((a, b) => {
-    const ai = SPATIAL_TYPES.indexOf(a.type as IFCType)
-    const bi = SPATIAL_TYPES.indexOf(b.type as IFCType)
-    const ar = ai === -1 ? 999 : ai
-    const br = bi === -1 ? 999 : bi
-    return ar - br
-  })
-
-  // Build spatial nodes (flat list, will be nested below)
-  const spatialNodes: TreeNode[] = spatialOrdered.map(obj => ({
-    id:       obj.globalId,
-    label:    obj.name || obj.type,
-    ifcType:  obj.type,
-    globalId: obj.globalId,
-    children: [],
-    isGroup:  false,
-  }))
-
-  // ── Build element branch — group by IFC type ──────────────────────────────
-  const typeMap = new Map<string, IFCObject[]>()
-  for (const obj of elementObjects) {
-    const existing = typeMap.get(obj.type) ?? []
-    existing.push(obj)
-    typeMap.set(obj.type, existing)
+  function addNode(node: DisplayNode): void {
+    nodes.set(node.id, node)
   }
 
-  // Sort type groups alphabetically
-  const sortedTypes = Array.from(typeMap.keys()).sort()
+  // ── Build element type-group subtree ──────────────────────────────────────
+  function buildElementGroups(
+    elementGlobalIds: string[],
+    parentId:         string,
+    depth:            number,
+    spatialNodeId:    string   // storey/space that owns these elements
+  ): string[] {
+    const byType = new Map<string, string[]>()
 
-  const elementTypeNodes: TreeNode[] = sortedTypes.map(ifcType => {
-    const items = typeMap.get(ifcType)!
-    const children: TreeNode[] = items.map(obj => ({
-      id:       obj.globalId,
-      label:    obj.name || 'Unnamed Element',
-      ifcType:  obj.type,
-      globalId: obj.globalId,
-      children: [],
+    for (const gid of elementGlobalIds) {
+      const obj = objectMap.get(gid)
+      if (!obj) continue
+      const arr = byType.get(obj.type) ?? []
+      arr.push(gid)
+      byType.set(obj.type, arr)
+    }
+
+    const sortedTypes = Array.from(byType.keys()).sort()
+    groupedCategories += sortedTypes.length
+    const groupIds: string[] = []
+
+    for (const ifcType of sortedTypes) {
+      const elemGids = byType.get(ifcType)!
+      elemGids.sort((a, b) => (objectMap.get(a)?.name ?? '').localeCompare(objectMap.get(b)?.name ?? ''))
+
+      const groupId  = `grp:${spatialNodeId}:${ifcType}`
+      const leafIds: string[] = []
+
+      for (const gid of elemGids) {
+        const obj     = objectMap.get(gid)
+        const leafId  = `leaf:${spatialNodeId}:${gid}`
+
+        // ── Void/fill sub-children ─────────────────────────────────────────
+        const openingIds   = spatialTree.elementToOpenings.get(gid) ?? []
+        const openingNodes: string[] = []
+
+        for (const openingGid of openingIds) {
+          const details      = spatialTree.openingDetails.get(openingGid)
+          const openingNodeId = `opening:${leafId}:${openingGid}`
+          const fillerGids   = spatialTree.openingToFillers.get(openingGid) ?? []
+          const fillerNodeIds: string[] = []
+
+          for (const fillerGid of fillerGids) {
+            const fillerObj    = objectMap.get(fillerGid)
+            const fillerNodeId = `filler:${openingNodeId}:${fillerGid}`
+            addNode({
+              id:       fillerNodeId,
+              label:    fillerObj?.name ?? 'Unnamed',
+              ifcType:  fillerObj?.type ?? 'IfcDoor',
+              globalId: fillerGid,
+              isGroup:  false,
+              childIds: [],
+              parentId: openingNodeId,
+              depth:    depth + 4,
+            })
+            fillerNodeIds.push(fillerNodeId)
+            fillingRelCount++
+          }
+
+          addNode({
+            id:       openingNodeId,
+            label:    details?.name ?? 'Opening',
+            ifcType:  details?.ifcType ?? 'IfcOpeningElement',
+            globalId: openingGid,
+            isGroup:  false,
+            childIds: fillerNodeIds,
+            parentId: leafId,
+            depth:    depth + 3,
+          })
+          openingNodes.push(openingNodeId)
+          openingRelCount++
+        }
+
+        addNode({
+          id:       leafId,
+          label:    obj?.name ?? 'Unnamed',
+          ifcType:  obj?.type ?? ifcType,
+          globalId: gid,
+          isGroup:  false,
+          childIds: openingNodes,
+          parentId: groupId,
+          depth:    depth + 1,
+        })
+        leafIds.push(leafId)
+      }
+
+      const typeName = ifcType.replace(/^Ifc/, '')
+      addNode({
+        id:       groupId,
+        label:    `${typeName} (${elemGids.length})`,
+        ifcType,
+        globalId: null,
+        isGroup:  true,
+        childIds: leafIds,
+        parentId,
+        depth,
+      })
+      groupIds.push(groupId)
+    }
+
+    return groupIds
+  }
+
+  // ── Walk spatial tree from root ───────────────────────────────────────────
+  function walkSpatialNode(
+    globalId: string,
+    parentId: string | null,
+    depth:    number
+  ): void {
+    const spatialNode = spatialTree.spatialNodes.get(globalId)
+    if (!spatialNode) return
+
+    const childIds: string[] = []
+
+    // Child spatial nodes (from IFCRELAGGREGATES)
+    for (const childGlobalId of spatialNode.childGlobalIds) {
+      walkSpatialNode(childGlobalId, globalId, depth + 1)
+      childIds.push(childGlobalId)
+      aggregateRelCount++
+    }
+
+    // Physical elements in this spatial container (from IFCRELCONTAINEDINSPATIALSTRUCTURE)
+    const elementGids = spatialTree.elementsByStorey.get(globalId) ?? []
+    if (elementGids.length > 0) {
+      const groupIds = buildElementGroups(elementGids, globalId, depth + 1, globalId)
+      childIds.push(...groupIds)
+      containmentCount += elementGids.length
+    }
+
+    addNode({
+      id:       globalId,
+      label:    spatialNode.name || spatialNode.ifcType,
+      ifcType:  spatialNode.ifcType,
+      globalId,
       isGroup:  false,
-    }))
-
-    return {
-      id:       `group:${ifcType}`,
-      label:    `${ifcType.replace(/^Ifc/, '')} (${items.length})`,
-      ifcType,
-      globalId: null,
-      children,
-      isGroup:  true,
-    }
-  })
-
-  // ── Assemble root ─────────────────────────────────────────────────────────
-  // If we have spatial structure: nest elements under the last (deepest) spatial node
-  // If no spatial structure: show a flat "Model" root
-  if (spatialNodes.length === 0) {
-    // No spatial hierarchy — flat model root
-    const modelRoot: TreeNode = {
-      id:       'group:model',
-      label:    'Model',
-      ifcType:  'IfcProject',
-      globalId: null,
-      children: elementTypeNodes,
-      isGroup:  true,
-    }
-    return [modelRoot]
+      childIds,
+      parentId,
+      depth,
+    })
   }
 
-  // Nest each spatial level inside the previous one (chain)
-  // Last spatial node gets the element type nodes as children
-  const chainedSpatial = [...spatialNodes]
-  if (elementTypeNodes.length > 0) {
-    const elementsGroupNode: TreeNode = {
-      id:       'group:elements',
-      label:    `Elements (${elementObjects.length})`,
+  // ── Add model filename root wrapper ───────────────────────────────────────
+  const modelRootId = 'root:model'
+
+  for (const rootId of spatialTree.rootIds) {
+    walkSpatialNode(rootId, modelRootId, 1)
+    aggregateRelCount--  // compensate for the extra count from the top level
+  }
+
+  addNode({
+    id:       modelRootId,
+    label:    modelName || 'Model',
+    ifcType:  'IfcProject',
+    globalId: null,
+    isGroup:  false,
+    childIds: [...spatialTree.rootIds],
+    parentId: null,
+    depth:    0,
+  })
+  rootIds.push(modelRootId)
+
+  // ── Unassigned elements (no storey membership) ────────────────────────────
+  const unassigned = spatialTree.elementsByStorey.get(UNASSIGNED_KEY) ?? []
+  if (unassigned.length > 0) {
+    const unassignedId = 'grp:unassigned'
+    const groupIds = buildElementGroups(unassigned, unassignedId, 1, UNASSIGNED_KEY)
+    addNode({
+      id:       unassignedId,
+      label:    `Unassigned (${unassigned.length})`,
       ifcType:  'IfcBuildingElement',
       globalId: null,
-      children: elementTypeNodes,
       isGroup:  true,
+      childIds: groupIds,
+      parentId: null,
+      depth:    0,
+    })
+    rootIds.push(unassignedId)
+  }
+
+  // ── Count orphans: spatial nodes not reached from any root ────────────────
+  const visitedIds = new Set<string>()
+  function markVisited(id: string): void {
+    if (visitedIds.has(id)) return
+    visitedIds.add(id)
+    const node = nodes.get(id)
+    if (node) node.childIds.forEach(markVisited)
+  }
+  rootIds.forEach(markVisited)
+  for (const id of spatialTree.spatialNodes.keys()) {
+    if (!visitedIds.has(id)) orphanNodeCount++
+  }
+
+  // ── Debug: relationship graph ─────────────────────────────────────────────
+  console.log('\n[IFCObjectTree] ── Building relationship graph ────────────────────')
+  for (const node of spatialTree.spatialNodes.values()) {
+    if (node.childGlobalIds.length > 0) {
+      console.log(`  ${node.ifcType} "${node.name}"`)
+      for (const childId of node.childGlobalIds) {
+        const child = spatialTree.spatialNodes.get(childId)
+        console.log(`      -> ${child?.ifcType ?? '?'} "${child?.name ?? childId}"`)
+      }
     }
-    chainedSpatial[chainedSpatial.length - 1].children.push(elementsGroupNode)
+    const contained = spatialTree.elementsByStorey.get(node.globalId) ?? []
+    if (contained.length > 0) {
+      console.log(`  ${node.ifcType} "${node.name}" contains:`)
+      // Group by type for display
+      const byType = new Map<string, number>()
+      for (const gid of contained) {
+        const t = objectMap.get(gid)?.type ?? '?'
+        byType.set(t, (byType.get(t) ?? 0) + 1)
+      }
+      for (const [t, count] of byType) {
+        console.log(`      ${t} ×${count}`)
+      }
+    }
   }
 
-  // Nest from deepest → shallowest so that each node contains the next
-  for (let i = chainedSpatial.length - 2; i >= 0; i--) {
-    chainedSpatial[i].children.unshift(chainedSpatial[i + 1])
+  for (const [elGid, openings] of spatialTree.elementToOpenings) {
+    const elName = objectMap.get(elGid)?.name ?? elGid
+    console.log(`  ${elName} voids:`)
+    for (const oGid of openings) {
+      const oName    = spatialTree.openingDetails.get(oGid)?.name ?? 'Opening'
+      const fillers  = spatialTree.openingToFillers.get(oGid) ?? []
+      console.log(`      Opening "${oName}"`)
+      for (const fGid of fillers) {
+        const fName = objectMap.get(fGid)?.name ?? fGid
+        console.log(`          filled by "${fName}"`)
+      }
+    }
   }
 
-  return [chainedSpatial[0]]
+  // ── Debug: hierarchy summary ──────────────────────────────────────────────
+  console.log('\n[IFCObjectTree] ── Detected hierarchy ─────────────────────────────')
+  function printHierarchy(id: string, indent: string): void {
+    const node = nodes.get(id)
+    if (!node) return
+    console.log(`${indent}${node.label} (${node.ifcType})`)
+    for (const childId of node.childIds.slice(0, 6)) {  // cap at 6 to avoid flooding
+      printHierarchy(childId, indent + '  ')
+    }
+    if (node.childIds.length > 6) {
+      console.log(`${indent}  ... (${node.childIds.length - 6} more)`)
+    }
+  }
+  for (const rid of rootIds) printHierarchy(rid, '  ')
+
+  // ── Debug: statistics ─────────────────────────────────────────────────────
+  console.log('\n[IFCObjectTree] ── Statistics ──────────────────────────────────────')
+  console.log(`  IfcRelAggregates resolved:      ${aggregateRelCount}`)
+  console.log(`  ContainedInStructure resolved:  ${containmentCount}`)
+  console.log(`  IfcRelVoidsElement resolved:    ${openingRelCount}`)
+  console.log(`  IfcRelFillsElement resolved:    ${fillingRelCount}`)
+  console.log(`  Grouped IFC categories:         ${groupedCategories}`)
+  console.log(`  Root nodes:                     ${rootIds.length}`)
+  console.log(`  Orphan spatial nodes:           ${orphanNodeCount}`)
+  console.log(`  Total display nodes:            ${nodes.size}`)
+  console.log('')
+
+  return { nodes, rootIds }
 }
 
-/**
- * Returns the set of node IDs that are ancestors of the given globalId,
- * so we can auto-expand the path to the selected node.
- */
-function findAncestorIds(nodes: TreeNode[], targetGlobalId: string): Set<string> {
+// ─── Fallback: type-grouped tree when no spatial data ────────────────────────
+
+function buildFlatFallbackTree(
+  objects: IFCObject[]
+): { nodes: Map<string, DisplayNode>; rootIds: string[] } {
+  const nodes:   Map<string, DisplayNode> = new Map()
+  const rootIds: string[]                 = []
+
+  const byType = new Map<string, IFCObject[]>()
+  for (const obj of objects) {
+    const arr = byType.get(obj.type) ?? []
+    arr.push(obj)
+    byType.set(obj.type, arr)
+  }
+
+  const sortedTypes = Array.from(byType.keys()).sort()
+  const typeGroupIds: string[] = []
+
+  for (const ifcType of sortedTypes) {
+    const items   = byType.get(ifcType)!
+    const groupId = `grp:type:${ifcType}`
+    const leafIds: string[] = []
+
+    items.sort((a, b) => a.name.localeCompare(b.name))
+    for (const obj of items) {
+      nodes.set(obj.globalId, {
+        id: obj.globalId, label: obj.name || 'Unnamed', ifcType: obj.type,
+        globalId: obj.globalId, isGroup: false, childIds: [], parentId: groupId, depth: 2,
+      })
+      leafIds.push(obj.globalId)
+    }
+
+    nodes.set(groupId, {
+      id: groupId, label: `${ifcType.replace(/^Ifc/, '')} (${items.length})`, ifcType,
+      globalId: null, isGroup: true, childIds: leafIds, parentId: 'grp:model', depth: 1,
+    })
+    typeGroupIds.push(groupId)
+  }
+
+  nodes.set('grp:model', {
+    id: 'grp:model', label: 'Model', ifcType: 'IfcProject',
+    globalId: null, isGroup: true, childIds: typeGroupIds, parentId: null, depth: 0,
+  })
+  rootIds.push('grp:model')
+
+  return { nodes, rootIds }
+}
+
+// ─── Visible row generation ───────────────────────────────────────────────────
+
+function buildVisibleRows(
+  rootIds:     string[],
+  nodes:       Map<string, DisplayNode>,
+  expandedIds: Set<string>,
+  query:       string
+): string[] {
+  const rows:   string[] = []
+  const lowerQ = query.toLowerCase().trim()
+
+  if (lowerQ) {
+    const toShow = new Set<string>()
+    for (const [id, node] of nodes) {
+      const matches =
+        node.label.toLowerCase().includes(lowerQ) ||
+        node.ifcType.toLowerCase().includes(lowerQ) ||
+        (node.globalId?.toLowerCase().includes(lowerQ) ?? false)
+
+      if (matches) {
+        let cur: DisplayNode | undefined = node
+        while (cur) { toShow.add(cur.id); cur = cur.parentId ? nodes.get(cur.parentId) : undefined }
+        for (const cid of node.childIds) toShow.add(cid)
+      }
+    }
+    function dfsSearch(id: string): void {
+      if (!toShow.has(id)) return
+      rows.push(id)
+      const node = nodes.get(id)
+      if (!node) return
+      for (const childId of node.childIds) dfsSearch(childId)
+    }
+    for (const rid of rootIds) dfsSearch(rid)
+    return rows
+  }
+
+  function dfs(id: string): void {
+    rows.push(id)
+    const node = nodes.get(id)
+    if (!node || !expandedIds.has(id)) return
+    for (const childId of node.childIds) dfs(childId)
+  }
+  for (const rid of rootIds) dfs(rid)
+  return rows
+}
+
+function getAncestorIds(nodes: Map<string, DisplayNode>, nodeId: string): Set<string> {
   const result = new Set<string>()
-
-  function search(node: TreeNode, path: string[]): boolean {
-    if (node.globalId === targetGlobalId) {
-      path.forEach(id => result.add(id))
-      return true
-    }
-    for (const child of node.children) {
-      if (search(child, [...path, node.id])) return true
-    }
-    return false
-  }
-
-  for (const root of nodes) {
-    search(root, [])
-  }
+  let cur = nodes.get(nodeId)
+  while (cur?.parentId) { result.add(cur.parentId); cur = nodes.get(cur.parentId) }
   return result
 }
 
-// ─── Tree node component ─────────────────────────────────────────────────────
+// ─── Single row ───────────────────────────────────────────────────────────────
 
-interface TreeNodeProps {
-  node:             TreeNode
-  depth:            number
-  expandedIds:      Set<string>
-  selectedGlobalId: string | null
-  onToggle:         (id: string) => void
-  onSelect:         (globalId: string) => void
-}
-
-function TreeNodeRow({
-  node,
-  depth,
-  expandedIds,
-  selectedGlobalId,
-  onToggle,
-  onSelect,
-}: TreeNodeProps) {
-  const isExpanded = expandedIds.has(node.id)
-  const isSelected = node.globalId !== null && node.globalId === selectedGlobalId
-  const hasChildren = node.children.length > 0
-
-  const icon = SPATIAL_ICONS[node.ifcType] ?? ifcTypeIcon(node.ifcType as IFCType)
+const TreeRow = memo(function TreeRow({
+  node, isExpanded, isSelected, onToggle, onSelect,
+}: {
+  node: DisplayNode; isExpanded: boolean; isSelected: boolean
+  onToggle: (id: string) => void; onSelect: (globalId: string) => void
+}) {
+  const hasChildren = node.childIds.length > 0
+  const icon        = SPATIAL_ICONS[node.ifcType] ?? ifcTypeIcon(node.ifcType as IFCType)
 
   const handleClick = useCallback(() => {
-    if (hasChildren) onToggle(node.id)
+    if (hasChildren)   onToggle(node.id)
     if (node.globalId) onSelect(node.globalId)
   }, [node.id, node.globalId, hasChildren, onToggle, onSelect])
 
-  const handleChevronClick = useCallback((e: React.MouseEvent) => {
+  const handleChevron = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
     if (hasChildren) onToggle(node.id)
   }, [node.id, hasChildren, onToggle])
 
   return (
-    <>
-      <div
-        className={`tree-node${isSelected ? ' tree-node--selected' : ''}${node.isGroup ? ' tree-node--group' : ''}`}
-        style={{ paddingLeft: 8 + depth * 16 }}
-        onClick={handleClick}
-        title={node.globalId ? `GlobalId: ${node.globalId}` : undefined}
-      >
-        {/* Chevron */}
-        <span
-          className={`tree-chevron${hasChildren ? ' tree-chevron--visible' : ''}${isExpanded ? ' tree-chevron--open' : ''}`}
-          onClick={handleChevronClick}
-        >
-          ▶
-        </span>
+    <div
+      className={['tree-node', isSelected ? 'tree-node--selected' : '', node.isGroup ? 'tree-node--group' : ''].filter(Boolean).join(' ')}
+      style={{ paddingLeft: 8 + node.depth * 14 }}
+      onClick={handleClick}
+      title={node.globalId ? `GlobalId: ${node.globalId}` : node.label}
+    >
+      <span
+        className={['tree-chevron', hasChildren ? 'tree-chevron--visible' : '', isExpanded ? 'tree-chevron--open' : ''].filter(Boolean).join(' ')}
+        onClick={handleChevron}
+        aria-hidden
+      >▶</span>
+      <span className="tree-icon">{icon}</span>
+      <span className="tree-label">{node.label}</span>
+      {!node.isGroup && node.childIds.length === 0 && !SPATIAL_ICONS[node.ifcType] && (
+        <span className="tree-type-badge">{node.ifcType.replace(/^Ifc/, '')}</span>
+      )}
+    </div>
+  )
+})
 
-        {/* Icon */}
-        <span className="tree-icon">{icon}</span>
+// ─── Virtual list ─────────────────────────────────────────────────────────────
 
-        {/* Label */}
-        <span className="tree-label">{node.label}</span>
+function VirtualList({
+  rowIds, nodes, expandedIds, selectedGlobalId, onToggle, onSelect,
+}: {
+  rowIds: string[]; nodes: Map<string, DisplayNode>; expandedIds: Set<string>
+  selectedGlobalId: string | null; onToggle: (id: string) => void; onSelect: (globalId: string) => void
+}) {
+  const scrollRef             = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [height,    setHeight]    = useState(400)
 
-        {/* IFC type badge for leaf elements */}
-        {!node.isGroup && (
-          <span className="tree-type-badge">{node.ifcType.replace(/^Ifc/, '')}</span>
-        )}
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(e => setHeight(e[0].contentRect.height))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const handleScroll = useCallback(() => { setScrollTop(scrollRef.current?.scrollTop ?? 0) }, [])
+
+  const totalHeight  = rowIds.length * ROW_HEIGHT
+  const startIndex   = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
+  const endIndex     = Math.min(rowIds.length, startIndex + Math.ceil(height / ROW_HEIGHT) + OVERSCAN * 2)
+  const visibleIds   = rowIds.slice(startIndex, endIndex)
+
+  return (
+    <div ref={scrollRef} className="tree-scroll" onScroll={handleScroll}>
+      <div style={{ height: totalHeight, position: 'relative' }}>
+        <div style={{ position: 'absolute', top: startIndex * ROW_HEIGHT, width: '100%' }}>
+          {visibleIds.map(id => {
+            const node = nodes.get(id)
+            if (!node) return null
+            return (
+              <TreeRow
+                key={id}
+                node={node}
+                isExpanded={expandedIds.has(id)}
+                isSelected={node.globalId !== null && node.globalId === selectedGlobalId}
+                onToggle={onToggle}
+                onSelect={onSelect}
+              />
+            )
+          })}
+        </div>
       </div>
-
-      {/* Children */}
-      {isExpanded && hasChildren && node.children.map(child => (
-        <TreeNodeRow
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          expandedIds={expandedIds}
-          selectedGlobalId={selectedGlobalId}
-          onToggle={onToggle}
-          onSelect={onSelect}
-        />
-      ))}
-    </>
+    </div>
   )
 }
 
-// ─── Main tree panel ─────────────────────────────────────────────────────────
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function IFCObjectTree() {
-  const ifcObjects        = useViewerStore(s => s.ifcObjects)
-  const modelLoadState    = useViewerStore(s => s.modelLoadState)
-  const primaryGlobalId   = useSelectionStore(s => s.primaryGlobalId)
-  const selectObject      = useSelectionStore(s => s.selectObject)
+  const ifcObjects      = useViewerStore(s => s.ifcObjects)
+  const spatialTree     = useViewerStore(s => s.spatialTree)
+  const modelLoadState  = useViewerStore(s => s.modelLoadState)
+  const modelFileName   = useViewerStore(s => s.modelFileName)
+  const primaryGlobalId = useSelectionStore(s => s.primaryGlobalId)
+  const selectObject    = useSelectionStore(s => s.selectObject)
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Build tree from flat objects
-  const tree = useMemo(() => buildTree(ifcObjects), [ifcObjects])
+  const objectMap = useMemo<Map<string, IFCObject>>(() => {
+    const m = new Map<string, IFCObject>()
+    for (const obj of ifcObjects) m.set(obj.globalId, obj)
+    return m
+  }, [ifcObjects])
 
-  // Reset tree when a new model loads
+  const modelName = modelFileName?.replace(/\.[^.]+$/, '') ?? 'Model'
+
+  const { nodes, rootIds } = useMemo(() => {
+    if (spatialTree && spatialTree.spatialNodes.size > 0 && ifcObjects.length > 0) {
+      return buildDisplayTree(spatialTree, objectMap, modelName)
+    }
+    if (ifcObjects.length > 0) {
+      console.warn('[IFCObjectTree] No spatial tree — falling back to type grouping')
+      return buildFlatFallbackTree(ifcObjects)
+    }
+    return { nodes: new Map<string, DisplayNode>(), rootIds: [] as string[] }
+  }, [spatialTree, ifcObjects, objectMap, modelName])
+
   useEffect(() => {
-    if (modelLoadState === 'loaded' && tree.length > 0) {
-      // Auto-expand root node
-      setExpandedIds(new Set([tree[0].id]))
+    if (modelLoadState === 'idle') { setExpandedIds(new Set()); setSearchQuery(''); return }
+    if (modelLoadState === 'loaded' && rootIds.length > 0) {
+      // Auto-expand root + first two levels
+      const initial = new Set<string>()
+      function expand(id: string, depth: number): void {
+        if (depth > 2) return
+        initial.add(id)
+        nodes.get(id)?.childIds.forEach(cid => expand(cid, depth + 1))
+      }
+      expand(rootIds[0], 0)
+      setExpandedIds(initial)
     }
-    if (modelLoadState === 'idle') {
-      setExpandedIds(new Set())
-      setSearchQuery('')
-    }
-  }, [modelLoadState, tree])
+  }, [modelLoadState, rootIds, nodes])
 
-  // Auto-expand path to selected node when 3D viewer picks an object
   const prevSelectedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!primaryGlobalId || primaryGlobalId === prevSelectedRef.current) return
     prevSelectedRef.current = primaryGlobalId
 
-    const ancestorIds = findAncestorIds(tree, primaryGlobalId)
-    if (ancestorIds.size > 0) {
-      setExpandedIds(prev => {
-        const next = new Set(prev)
-        ancestorIds.forEach(id => next.add(id))
-        return next
-      })
+    // The leaf node for a selected element may have id = "leaf:storeyId:globalId"
+    // Find it by looking for a node whose globalId matches
+    let targetId: string | undefined
+    for (const [id, node] of nodes) {
+      if (node.globalId === primaryGlobalId) { targetId = id; break }
     }
-  }, [primaryGlobalId, tree])
+    if (!targetId) return
 
-  const handleToggle = useCallback((id: string) => {
+    const ancestors = getAncestorIds(nodes, targetId)
+    if (ancestors.size === 0) return
+
     setExpandedIds(prev => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else               next.add(id)
+      ancestors.forEach(id => next.add(id))
       return next
     })
+  }, [primaryGlobalId, nodes])
+
+  const visibleRowIds = useMemo(
+    () => buildVisibleRows(rootIds, nodes, expandedIds, searchQuery),
+    [rootIds, nodes, expandedIds, searchQuery]
+  )
+
+  const handleToggle      = useCallback((id: string) => {
+    setExpandedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
   }, [])
-
-  const handleSelect = useCallback((globalId: string) => {
-    selectObject(globalId, false)
-  }, [selectObject])
-
-  const handleExpandAll = useCallback(() => {
-    const allIds = new Set<string>()
-    function collect(node: TreeNode) {
-      allIds.add(node.id)
-      node.children.forEach(collect)
-    }
-    tree.forEach(collect)
-    setExpandedIds(allIds)
-  }, [tree])
-
-  const handleCollapseAll = useCallback(() => {
-    setExpandedIds(new Set())
-  }, [])
-
-  // Search filtering — builds a filtered tree keeping any node
-  // whose label or type matches, plus all its ancestors
-  const filteredTree = useMemo(() => {
-    if (!searchQuery.trim()) return tree
-
-    const q = searchQuery.toLowerCase()
-
-    function nodeMatches(node: TreeNode): boolean {
-      return (
-        node.label.toLowerCase().includes(q) ||
-        node.ifcType.toLowerCase().includes(q) ||
-        (node.globalId?.toLowerCase().includes(q) ?? false)
-      )
-    }
-
-    function filterNode(node: TreeNode): TreeNode | null {
-      const filteredChildren = node.children
-        .map(filterNode)
-        .filter((n): n is TreeNode => n !== null)
-
-      if (nodeMatches(node) || filteredChildren.length > 0) {
-        return { ...node, children: filteredChildren }
-      }
-      return null
-    }
-
-    return tree.map(filterNode).filter((n): n is TreeNode => n !== null)
-  }, [tree, searchQuery])
-
-  // Auto-expand all when searching
-  useEffect(() => {
-    if (!searchQuery.trim()) return
-    const allIds = new Set<string>()
-    function collect(node: TreeNode) {
-      allIds.add(node.id)
-      node.children.forEach(collect)
-    }
-    filteredTree.forEach(collect)
-    setExpandedIds(allIds)
-  }, [filteredTree, searchQuery])
-
-  // ── Empty states ──────────────────────────────────────────────────────────
+  const handleSelect      = useCallback((globalId: string) => selectObject(globalId, false), [selectObject])
+  const handleExpandAll   = useCallback(() => setExpandedIds(new Set(nodes.keys())), [nodes])
+  const handleCollapseAll = useCallback(() => setExpandedIds(new Set()), [])
 
   if (modelLoadState !== 'loaded') {
-    return (
-      <div className="tree-empty">
-        <div className="tree-empty__icon">🌲</div>
-        <p>Load an IFC model to view the object tree</p>
-      </div>
-    )
+    return <div className="tree-empty"><div className="tree-empty__icon">🌲</div><p>Load an IFC model to view the object tree</p></div>
+  }
+  if (ifcObjects.length === 0) {
+    return <div className="tree-empty"><div className="tree-empty__icon">📭</div><p>No objects found in model</p></div>
   }
 
-  if (ifcObjects.length === 0) {
-    return (
-      <div className="tree-empty">
-        <div className="tree-empty__icon">📭</div>
-        <p>No objects found in model</p>
-      </div>
-    )
-  }
+  const hasSpatial = spatialTree && spatialTree.spatialNodes.size > 0
 
   return (
     <div className="tree-panel">
-      {/* Search + toolbar */}
       <div className="tree-toolbar">
         <input
           className="tree-search"
@@ -5811,26 +6568,29 @@ export default function IFCObjectTree() {
         <button className="tree-action-btn" onClick={handleCollapseAll} title="Collapse all">⊟</button>
       </div>
 
-      {/* Tree */}
-      <div className="tree-scroll">
-        {filteredTree.length === 0 ? (
-          <div className="tree-empty tree-empty--inline">
-            <p>No results for "{searchQuery}"</p>
-          </div>
-        ) : (
-          filteredTree.map(node => (
-            <TreeNodeRow
-              key={node.id}
-              node={node}
-              depth={0}
-              expandedIds={expandedIds}
-              selectedGlobalId={primaryGlobalId}
-              onToggle={handleToggle}
-              onSelect={handleSelect}
-            />
-          ))
-        )}
+      <div className="tree-stats-bar">
+        <span className="tree-stats-count">{ifcObjects.length.toLocaleString()} elements</span>
+        {searchQuery.trim() && <span className="tree-stats-matches">{visibleRowIds.length} visible</span>}
+        <span
+          className={`tree-stats-mode${hasSpatial ? '' : ' tree-stats-mode--fallback'}`}
+          title={hasSpatial ? 'Hierarchy from IFC relationships' : 'Type-grouped (no spatial data)'}
+        >
+          {hasSpatial ? '📐 Spatial' : '📋 Grouped'}
+        </span>
       </div>
+
+      {visibleRowIds.length === 0 ? (
+        <div className="tree-empty tree-empty--inline"><p>No results for "{searchQuery}"</p></div>
+      ) : (
+        <VirtualList
+          rowIds={visibleRowIds}
+          nodes={nodes}
+          expandedIds={expandedIds}
+          selectedGlobalId={primaryGlobalId}
+          onToggle={handleToggle}
+          onSelect={handleSelect}
+        />
+      )}
     </div>
   )
 }
@@ -7193,11 +7953,11 @@ FILE: src\features\viewer\IFCUploadZone.tsx
 ====================================================================================================
 
 import { useRef, useState, useCallback, type DragEvent } from 'react'
-import { useViewerStore } from '../../store/viewer.store'
+import { useViewerStore }    from '../../store/viewer.store'
 import { useSelectionStore } from '../../store/selection.store'
 import { useSimulationStore } from '../../store/simulation.store'
-import { useLayerStore } from '../../store/layer.store'
-import { IFCParserService } from '../../services/ifc/IFCParserService'
+import { useLayerStore }     from '../../store/layer.store'
+import { IFCParserService }  from '../../services/ifc/IFCParserService'
 import type { ViewerEngine } from '../../viewer/ViewerEngine'
 
 interface IFCUploadZoneProps {
@@ -7212,6 +7972,7 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
   const setModelLoadState   = useViewerStore(s => s.setModelLoadState)
   const setModelError       = useViewerStore(s => s.setModelError)
   const setIFCObjects       = useViewerStore(s => s.setIFCObjects)
+  const setSpatialTree      = useViewerStore(s => s.setSpatialTree)   // NEW
   const setModelMeta        = useViewerStore(s => s.setModelMeta)
   const modelLoadState      = useViewerStore(s => s.modelLoadState)
   const modelError          = useViewerStore(s => s.modelError)
@@ -7231,22 +7992,16 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
     }
 
     // ── Step 1: Unload the previous 3D model ─────────────────
-    // model.dispose() frees the worker thread slot, shared
-    // MaterialManager entries, GPU tile geometry, and removes
-    // model.object from the Three.js scene.
-    // Must happen before store resets so colour/selection effects
-    // that read loadedModels do not fire against stale data.
     try {
       await viewerEngine.unloadAll()
     } catch (err) {
       console.warn('[IFCUploadZone] unloadAll warning:', err)
-      // Non-fatal — proceed with load
     }
 
     // ── Step 2: Clear all application state ──────────────────
-    clearSelection()          // Inspector empties, Gantt deselects
-    deactivateSimulation()    // Removes simulation colour overlay
-    clearLayerFilters()       // Resets layer filter panel
+    clearSelection()
+    deactivateSimulation()
+    clearLayerFilters()
 
     // ── Step 3: Transition to loading state ──────────────────
     setModelLoadState('loading')
@@ -7263,10 +8018,10 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
       return
     }
 
-    // IMPORTANT: set ifcObjects BEFORE setting modelLoadState to 'loaded'
-    // so any component reading ifcObjects.length on state change
-    // already has the correct value.
+    // IMPORTANT: set objects and spatial tree BEFORE setting modelLoadState
+    // to 'loaded' so the Object Explorer already has data when it re-renders.
     setIFCObjects(result.ifcObjects)
+    setSpatialTree(result.spatialTree)   // NEW — may be null if extraction failed
     setModelLoadState('loaded')
 
     if (result.error) {
@@ -7280,6 +8035,7 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
     setModelError,
     setModelMeta,
     setIFCObjects,
+    setSpatialTree,
     clearSelection,
     deactivateSimulation,
     clearLayerFilters,
@@ -7302,7 +8058,6 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
   const handleInputChange = useCallback(() => {
     const file = inputRef.current?.files?.[0]
     if (file) handleFile(file)
-    // Reset input so same file can be re-selected
     if (inputRef.current) inputRef.current.value = ''
   }, [handleFile])
 
@@ -7405,25 +8160,18 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 FILE: src\services\ifc\IFCParserService.ts
 ====================================================================================================
 
-/**
- * IFCParserService — Orchestrates the full IFC load pipeline.
- *
- * Fix: setIFCObjects and onModelLoaded must share the same source of truth.
- * The UI count comes from ifcObjects.length — so we must call setIFCObjects
- * with the real extracted objects, not rely on onModelLoaded's raw count.
- */
-
-import type { ViewerEngine } from '../../viewer/ViewerEngine'
-import { IFCLoaderWrapper } from '../../viewer/IFCLoader'
-import { IFCUploadService } from './IFCUploadService'
-import type { IFCObject } from '../../types'
+import type { ViewerEngine }   from '../../viewer/ViewerEngine'
+import { IFCLoaderWrapper }    from '../../viewer/IFCLoader'
+import { IFCUploadService }    from './IFCUploadService'
+import type { IFCObject, IFCSpatialTree } from '../../types'
 
 export interface ParseResult {
-  success:    boolean
-  ifcObjects: IFCObject[]
-  error?:     string
-  fileName?:  string
-  fileSize?:  number
+  success:     boolean
+  ifcObjects:  IFCObject[]
+  spatialTree: IFCSpatialTree | null
+  error?:      string
+  fileName?:   string
+  fileSize?:   number
 }
 
 export class IFCParserService {
@@ -7433,72 +8181,88 @@ export class IFCParserService {
     this.viewerEngine = viewerEngine
   }
 
-  /**
-   * Full pipeline:
-   *   1. Validate and read the file
-   *   2. Load buffer into viewer  → renders 3D geometry
-   *   3. Extract IFCObject[]      → populates the store / UI count
-   *
-   * Always returns — never throws unhandled exceptions.
-   */
   async parseFile(file: File): Promise<ParseResult> {
-    // ── Step 1: Validate ──────────────────────────────────
+    // ── Step 1: Validate ─────────────────────────────────────
     const validation = await IFCUploadService.validateAndRead(file)
 
     if (!validation.valid || !validation.buffer) {
       return {
-        success:    false,
-        ifcObjects: [],
-        error:      validation.error ?? 'File validation failed',
-        fileName:   validation.fileName,
-        fileSize:   validation.fileSize,
+        success:     false,
+        ifcObjects:  [],
+        spatialTree: null,
+        error:       validation.error ?? 'File validation failed',
+        fileName:    validation.fileName,
+        fileSize:    validation.fileSize,
       }
     }
 
-    // ── Step 2: Load into viewer (renders geometry) ───────
+    // ── Step 2: Load into viewer ─────────────────────────────
     let model
     try {
-      // Strip extension from fileName to use as model ID
       const modelName = validation.fileName.replace(/\.[^.]+$/, '')
       model = await this.viewerEngine.loadIFC(validation.buffer, modelName)
     } catch (err) {
       return {
-        success:    false,
-        ifcObjects: [],
-        error:      err instanceof Error ? err.message : 'Failed to load IFC model',
-        fileName:   validation.fileName,
-        fileSize:   validation.fileSize,
+        success:     false,
+        ifcObjects:  [],
+        spatialTree: null,
+        error:       err instanceof Error ? err.message : 'Failed to load IFC model',
+        fileName:    validation.fileName,
+        fileSize:    validation.fileSize,
       }
     }
 
-    // ── Step 3: Extract IFC objects ───────────────────────
-    // This is what populates the UI element count.
-    // Must complete BEFORE returning success so setIFCObjects
-    // is called with real data, not an empty array.
-    let ifcObjects: IFCObject[] = []
+    // ── Steps 3a + 3b: Elements and spatial tree in parallel ─
+    const loaderWrapper = new IFCLoaderWrapper()
+
+    let ifcObjects:  IFCObject[]           = []
+    let spatialTree: IFCSpatialTree | null = null
 
     try {
-      const loaderWrapper = new IFCLoaderWrapper()
-      ifcObjects = await loaderWrapper.extractObjects(model)
+      const [objects, tree] = await Promise.all([
+        loaderWrapper.extractObjects(model),
+        loaderWrapper.extractSpatialTree(model),
+      ])
+      ifcObjects  = objects
+      spatialTree = tree
 
-      console.log(`[IFCParserService] Extracted ${ifcObjects.length} IFC objects from "${validation.fileName}"`)
+      // ── Step 3c: Void/fill relations ─────────────────────
+      // Only attempt if we have elements to work with.
+      if (ifcObjects.length > 0 && spatialTree) {
+        try {
+          const elementGlobalIds = ifcObjects.map(o => o.globalId)
+          const voidFill = await loaderWrapper.extractVoidFillRelations(model, elementGlobalIds)
+          spatialTree.elementToOpenings = voidFill.elementToOpenings
+          spatialTree.openingToFillers  = voidFill.openingToFillers
+          spatialTree.openingDetails    = voidFill.openingDetails
+        } catch (vfErr) {
+          console.warn('[IFCParserService] Void/fill extraction failed (non-fatal):', vfErr)
+          // spatialTree already has empty maps from extractSpatialTree, that's fine
+        }
+      }
 
+      console.log(
+        `[IFCParserService] Extracted ${ifcObjects.length} objects, ` +
+        `${spatialTree?.spatialNodes.size ?? 0} spatial nodes, ` +
+        `${spatialTree?.elementToOpenings.size ?? 0} elements with openings ` +
+        `from "${validation.fileName}"`
+      )
     } catch (err) {
-      // Model rendered — extraction failed — partial success
-      console.warn('[IFCParserService] Property extraction failed:', err)
-
+      console.warn('[IFCParserService] Extraction failed:', err)
       return {
-        success:    true,
-        ifcObjects: [],
-        error:      'Model rendered but element extraction failed. Element count will show 0.',
-        fileName:   validation.fileName,
-        fileSize:   validation.fileSize,
+        success:     true,
+        ifcObjects:  [],
+        spatialTree: null,
+        error:       'Model rendered but element extraction failed.',
+        fileName:    validation.fileName,
+        fileSize:    validation.fileSize,
       }
     }
 
     return {
       success:  true,
       ifcObjects,
+      spatialTree,
       fileName: validation.fileName,
       fileSize: validation.fileSize,
     }
@@ -8057,17 +8821,8 @@ export const useUIStore = create<UIState>((set) => ({
 FILE: src\store\viewer.store.ts
 ====================================================================================================
 
-/**
- * Viewer store — Phase 2 update.
- *
- * Now tracks real IFC loading state in addition to
- * the viewer engine reference. The ViewerEngine instance
- * is stored as a ref outside React — this store only
- * holds serializable state.
- */
-
 import { create } from 'zustand'
-import type { IFCObject } from '../types'
+import type { IFCObject, IFCSpatialTree } from '../types'
 
 export type RenderMode = 'perspective' | 'top' | 'front' | 'wireframe'
 
@@ -8078,8 +8833,16 @@ export type ModelLoadState =
   | 'error'       // Load failed
 
 interface ViewerState {
-  /** All IFC objects currently loaded */
+  /** All IFC objects currently loaded (physical elements only) */
   ifcObjects:       IFCObject[]
+
+  /**
+   * The IFC spatial decomposition tree.
+   * Built from IFCRELAGGREGATES + IFCRELCONTAINEDINSPATIALSTRUCTURE.
+   * null when no model is loaded or extraction failed.
+   */
+  spatialTree:      IFCSpatialTree | null
+
   /** Current model load state */
   modelLoadState:   ModelLoadState
   /** Error message if modelLoadState === 'error' */
@@ -8095,6 +8858,7 @@ interface ViewerState {
 
   // ── Actions ──────────────────────────────────────────────
   setIFCObjects:      (objects: IFCObject[]) => void
+  setSpatialTree:     (tree: IFCSpatialTree | null) => void
   setModelLoadState:  (state: ModelLoadState) => void
   setModelError:      (error: string | null) => void
   setModelMeta:       (fileName: string, fileSize: number) => void
@@ -8106,6 +8870,7 @@ interface ViewerState {
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
   ifcObjects:      [],
+  spatialTree:     null,
   modelLoadState:  'idle',
   modelError:      null,
   modelFileName:   null,
@@ -8114,6 +8879,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   renderMode:      'perspective',
 
   setIFCObjects:     (objects) => set({ ifcObjects: objects }),
+  setSpatialTree:    (tree)    => set({ spatialTree: tree }),
   setModelLoadState: (state)   => set({ modelLoadState: state }),
   setModelError:     (error)   => set({ modelError: error }),
   setModelMeta:      (fileName, fileSize) => set({ modelFileName: fileName, modelFileSize: fileSize }),
@@ -8122,6 +8888,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   resetModel: () => set({
     ifcObjects:    [],
+    spatialTree:   null,
     modelLoadState:'idle',
     modelError:    null,
     modelFileName: null,
@@ -8396,15 +9163,17 @@ export interface IFCObject {
 }
 
 /**
- * A single IFC property from a property set.
+ * A single IFC property from a property set or quantity set.
  */
 export interface IFCProperty {
-  /** Name of the property set (e.g. "Pset_WallCommon") */
+  /** Name of the property set (e.g. "Pset_WallCommon") or quantity set (e.g. "BaseQuantities") */
   set: string
   /** Property name */
   name: string
   /** Property value — typed to match IFC value types */
   value: string | number | boolean | null
+  /** Optional unit string (e.g. "m", "m²", "m³") extracted from IfcQuantity* */
+  unit?: string
 }
 
 /**
@@ -8420,12 +9189,88 @@ export interface IFCClassification {
   label: string
 }
 
+// ─── Spatial tree ─────────────────────────────────────────────────────────────
+
+/**
+ * A node in the IFC spatial decomposition tree.
+ *
+ * Spatial nodes (IfcProject / IfcSite / IfcBuilding / IfcBuildingStorey / IfcSpace)
+ * have their children listed in childGlobalIds.
+ *
+ * Physical element nodes (walls, doors, etc.) have no children in this tree —
+ * their storey membership is captured in IFCSpatialTree.elementsByStorey.
+ */
+export interface IFCSpatialNode {
+  globalId:   string
+  expressId?: number
+  name:       string
+  ifcType:    string
+  /** GlobalIds of child spatial nodes (from IfcRelAggregates) */
+  childGlobalIds: string[]
+}
+
+/**
+ * The fully resolved IFC spatial decomposition extracted from
+ * IFCRELAGGREGATES and IFCRELCONTAINEDINSPATIALSTRUCTURE.
+ *
+ * Produced once by IFCLoaderWrapper and stored in viewer.store.
+ * Consumed by IFCObjectTree to render the correct hierarchy.
+ */
+export interface IFCSpatialTree {
+  /**
+   * Ordered list of root node GlobalIds (usually one IfcProject).
+   */
+  rootIds: string[]
+
+  /**
+   * Map from spatial node GlobalId → IFCSpatialNode.
+   * Covers IfcProject, IfcSite, IfcBuilding, IfcBuildingStorey, IfcSpace.
+   */
+  spatialNodes: Map<string, IFCSpatialNode>
+
+  /**
+   * Map from storey GlobalId → array of physical element GlobalIds
+   * contained in that storey (from IFCRELCONTAINEDINSPATIALSTRUCTURE).
+   *
+   * Elements that have no storey membership appear in the special key
+   * "__unassigned__".
+   */
+  elementsByStorey: Map<string, string[]>
+
+  /**
+   * Map from element GlobalId → storey GlobalId (reverse of elementsByStorey).
+   * Used for O(1) storey lookup during ancestor-path building in the tree.
+   */
+  storeyByElement: Map<string, string>
+
+  /**
+   * Map from physical element GlobalId → opening element GlobalIds
+   * (from IFCRELVOIDSELEMENT).  E.g. wall → [opening1, opening2]
+   */
+  elementToOpenings: Map<string, string[]>
+
+  /**
+   * Map from opening element GlobalId → filler GlobalIds
+   * (from IFCRELFILLSELEMENT). E.g. opening → [door]
+   */
+  openingToFillers: Map<string, string[]>
+
+  /**
+   * Basic info (name + ifcType) for each opening element.
+   * Allows the tree to label opening nodes correctly.
+   */
+  openingDetails: Map<string, { name: string; ifcType: string }>
+}
+
+// ─── IFC Types ────────────────────────────────────────────────────────────────
+
 /**
  * Supported IFC entity types.
  * Extendable — add new types here as the model grows.
  */
 export type IFCType =
   | 'IfcWall'
+  | 'IfcWallStandardCase'
   | 'IfcSlab'
   | 'IfcColumn'
   | 'IfcBeam'
@@ -8438,11 +9283,15 @@ export type IFCType =
   | 'IfcRoof'
   | 'IfcFoundation'
   | 'IfcBuildingElementProxy'
+  | 'IfcProject'
+  | 'IfcSite'
+  | 'IfcBuilding'
+  | 'IfcBuildingStorey'
+  | 'IfcSpace'
   | string // Allow any IFC type string for forward compatibility
 
 /**
  * Supported classification systems.
- * Extendable for future AI and standard system integrations.
  */
 export type IFCClassificationSystem =
   | 'CoClass'
@@ -8457,18 +9306,14 @@ export type IFCClassificationSystem =
 FILE: src\types\index.ts
 ====================================================================================================
 
-/**
- * Barrel export for all domain types.
- * Import from here throughout the application:
- *   import type { IFCObject, Activity } from '../types'
- */
-
 export type {
   IFCObject,
   IFCProperty,
   IFCClassification,
   IFCType,
   IFCClassificationSystem,
+  IFCSpatialNode,
+  IFCSpatialTree,
 } from './ifc.types'
 
 export type {
@@ -9043,28 +9888,35 @@ FILE: src\viewer\IFCLoader.ts
 
 import * as FRAGS from '@thatopen/fragments'
 import { ifcCategoryMap, ifcClasses } from '@thatopen/fragments'
-import type { IFCObject, IFCProperty } from '../types'
+import type { IFCObject, IFCProperty, IFCSpatialNode, IFCSpatialTree } from '../types'
 import { mapRawArrayToIFCObjects } from '../core/ifc/IFCObjectMapper'
 
-// ─── Build the physical-product category regex list at module load time ───────
-//
-// ifcClasses.elements is a Set<number> of numeric IFC type codes covering all
-// 147 physical product types (walls, doors, slabs, MEP, structure, etc.) as
-// defined in the IFC schema.  ifcCategoryMap maps those codes to their
-// uppercase string names (e.g. 159607094 → "IFCWALL").
+// ─── Category regexp lists ────────────────────────────────────────────────────
 
 const ELEMENT_CATEGORY_REGEXPS: RegExp[] = (() => {
   const regexps: RegExp[] = []
   for (const typeCode of ifcClasses.elements) {
     const name = ifcCategoryMap[typeCode as unknown as number]
-    if (name) {
-      regexps.push(new RegExp(`^${name}$`, 'i'))
-    }
+    if (name) regexps.push(new RegExp(`^${name}$`, 'i'))
   }
   return regexps
 })()
 
-// ─── Reverse-map: numeric type code (as string) → uppercase IFC name ─────────
+const SPATIAL_CATEGORY_REGEXPS: RegExp[] = [
+  /^IFCPROJECT$/i,
+  /^IFCSITE$/i,
+  /^IFCBUILDING$/i,
+  /^IFCBUILDINGSTOREY$/i,
+  /^IFCSPACE$/i,
+]
+
+// Also fetch openings so we can resolve void/fill relationships
+const OPENING_CATEGORY_REGEXPS: RegExp[] = [
+  /^IFCOPENINGELEMENT$/i,
+  /^IFCVIRTUALELEMENT$/i,
+]
+
+// ─── Reverse-map: numeric type code → uppercase IFC name ─────────────────────
 
 const NUMERIC_CODE_TO_NAME: Map<string, string> = (() => {
   const m = new Map<string, string>()
@@ -9076,118 +9928,71 @@ const NUMERIC_CODE_TO_NAME: Map<string, string> = (() => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Converts a raw category key to a PascalCase IFC type string.
- *   "IFCWALLSTANDARDCASE" → "IfcWallStandardCase"
- *   "659739252"           → resolves via ifcCategoryMap then converts
- */
 function categoryKeyToIfcType(rawKey: string): string {
   let upperName = rawKey.toUpperCase()
   if (/^\d+$/.test(rawKey)) {
     upperName = NUMERIC_CODE_TO_NAME.get(rawKey) ?? 'IFCBUILDINGELEMENTPROXY'
   }
-  if (!upperName.startsWith('IFC')) {
-    return upperName
-  }
+  if (!upperName.startsWith('IFC')) return upperName
   return upperName.charAt(0).toUpperCase() + upperName.slice(1).toLowerCase()
 }
 
-/**
- * Universal IFC value unwrapper — handles every shape returned by this build.
- *
- * ALL fields in the item object — including _guid, _localId, _category, Name,
- * ObjectType, Tag, Description — are wrapped as { value: <primitive> }.
- * None are bare primitives.
- *
- * Shapes handled:
- *   { value: "string" }                     → "string"
- *   { value: { value: "string", type: x } } → "string"  (nested wrap)
- *   "string"                                → "string"  (rare bare primitive)
- *   42                                      → "42"       (rare bare number)
- *   anything else / null                    → null
- *
- * Returns a trimmed non-empty string, or null.
- */
 function unwrapString(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null
-
-  // Bare primitive fallback (safe to handle even if not the normal case)
-  if (typeof raw === 'string') {
-    const s = raw.trim()
-    return s.length > 0 ? s : null
-  }
-  if (typeof raw === 'number') return String(raw)
+  if (typeof raw === 'string')  { const s = raw.trim(); return s.length > 0 ? s : null }
+  if (typeof raw === 'number')  return String(raw)
   if (typeof raw === 'boolean') return String(raw)
+  if (typeof raw !== 'object')  return null
 
-  if (typeof raw !== 'object') return null
-
-  // Standard wrapper: { value: x, type?: ... }
   let v = (raw as Record<string, unknown>)['value']
-
-  // One level of nesting: { value: { value: x, type: ... }, type: ... }
   if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
     v = (v as { value: unknown }).value
   }
-
-  if (typeof v === 'string') {
-    const s = v.trim()
-    return s.length > 0 ? s : null
-  }
-  if (typeof v === 'number') return String(v)
+  if (typeof v === 'string')  { const s = v.trim(); return s.length > 0 ? s : null }
+  if (typeof v === 'number')  return String(v)
+  if (typeof v === 'boolean') return String(v)
   return null
 }
 
-/**
- * Same as unwrapString but returns a number for numeric IFC values.
- * Used for _localId which must be kept as a number for expressId.
- *
- * Returns a number, or undefined.
- */
 function unwrapNumber(raw: unknown): number | undefined {
   if (raw === null || raw === undefined) return undefined
   if (typeof raw === 'number') return raw
-
   if (typeof raw !== 'object') return undefined
 
   let v = (raw as Record<string, unknown>)['value']
-
   if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
     v = (v as { value: unknown }).value
   }
-
   if (typeof v === 'number') return v
-  if (typeof v === 'string') {
-    const n = Number(v)
-    return isNaN(n) ? undefined : n
-  }
+  if (typeof v === 'string') { const n = Number(v); return isNaN(n) ? undefined : n }
   return undefined
 }
 
-/**
- * Reads and unwraps a named field from an item record.
- * Thin wrapper around unwrapString for named-key access.
- */
-function readAttr(
-  data: Record<string, unknown>,
-  key: string
-): string | null {
+function unwrapScalar(raw: unknown): string | number | boolean | null {
+  if (raw === null || raw === undefined) return null
+  if (typeof raw === 'string')  return raw.trim() || null
+  if (typeof raw === 'number')  return raw
+  if (typeof raw === 'boolean') return raw
+  if (typeof raw !== 'object')  return null
+
+  let v = (raw as Record<string, unknown>)['value']
+  if (v !== null && typeof v === 'object' && 'value' in (v as object)) {
+    v = (v as { value: unknown }).value
+  }
+  if (typeof v === 'string')  return v.trim() || null
+  if (typeof v === 'number')  return v
+  if (typeof v === 'boolean') return v
+  return null
+}
+
+function readAttr(data: Record<string, unknown>, key: string): string | null {
   return unwrapString(data[key])
 }
 
-/**
- * Extracts IFCProperty entries from the IsDefinedBy relation tree.
- *
- * IFC traversal path:
- *   item['IsDefinedBy']                  → ItemData[]
- *     rel['RelatingPropertyDefinition']  → ItemData (IfcPropertySet)
- *       pset['Name']                     → Pset name
- *       pset['HasProperties']            → ItemData[] (IfcPropertySingleValue)
- *         prop['Name']                   → property name
- *         prop['NominalValue']           → property value
- */
+// ─── Pset / quantity extraction ───────────────────────────────────────────────
+
 function extractPsets(itemData: Record<string, unknown>): IFCProperty[] {
   const props: IFCProperty[] = []
-
   const isDefinedBy = itemData['IsDefinedBy']
   if (!Array.isArray(isDefinedBy)) return props
 
@@ -9197,82 +10002,459 @@ function extractPsets(itemData: Record<string, unknown>): IFCProperty[] {
     const psetEntry = rel['RelatingPropertyDefinition']
     if (!psetEntry || typeof psetEntry !== 'object') continue
 
-    const pset = psetEntry as Record<string, unknown>
+    const pset     = psetEntry as Record<string, unknown>
     const psetName = readAttr(pset, 'Name') ?? 'UnknownPset'
 
+    // Branch A: IfcPropertySet → HasProperties
     const hasProperties = pset['HasProperties']
-    if (!Array.isArray(hasProperties)) continue
+    if (Array.isArray(hasProperties)) {
+      for (const propEntry of hasProperties as Record<string, unknown>[]) {
+        if (!propEntry || typeof propEntry !== 'object') continue
+        const prop     = propEntry as Record<string, unknown>
+        const propName = readAttr(prop, 'Name')
+        if (!propName) continue
 
-    for (const propEntry of hasProperties as Record<string, unknown>[]) {
-      if (!propEntry || typeof propEntry !== 'object') continue
-      const prop = propEntry as Record<string, unknown>
+        const nomRaw = prop['NominalValue']
+        let propValue: string | number | boolean | null = null
 
-      const propName = readAttr(prop, 'Name')
-      if (!propName) continue
-
-      // NominalValue may itself be a wrapped IFC value of any scalar type
-      const nomRaw = prop['NominalValue']
-      let propValue: string | number | boolean | null = null
-
-      if (nomRaw !== null && nomRaw !== undefined) {
-        let v: unknown = nomRaw
-        if (typeof v === 'object' && 'value' in (v as object)) {
-          v = (v as { value: unknown }).value
+        if (nomRaw !== null && nomRaw !== undefined) {
+          propValue = unwrapScalar(nomRaw)
+          if (propValue === null && typeof nomRaw === 'object') {
+            const inner = (nomRaw as Record<string, unknown>)['value']
+            if (typeof inner === 'object' && inner !== null && 'value' in (inner as object)) {
+              propValue = unwrapScalar((inner as { value: unknown }).value)
+            } else {
+              propValue = unwrapScalar(inner)
+            }
+          }
         }
-        if (typeof v === 'object' && v !== null && 'value' in (v as object)) {
-          v = (v as { value: unknown }).value
-        }
-        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-          propValue = v
-        } else if (v !== null && v !== undefined) {
-          propValue = String(v)
-        }
+
+        props.push({ set: psetName, name: propName, value: propValue })
       }
+      continue
+    }
 
-      props.push({ set: psetName, name: propName, value: propValue })
+    // Branch B: IfcElementQuantity → Quantities
+    const quantities = pset['Quantities']
+    if (Array.isArray(quantities)) {
+      const QTY_VALUE_KEYS = ['LengthValue','AreaValue','VolumeValue','WeightValue','CountValue','TimeValue']
+      for (const qEntry of quantities as Record<string, unknown>[]) {
+        if (!qEntry || typeof qEntry !== 'object') continue
+        const q     = qEntry as Record<string, unknown>
+        const qName = readAttr(q, 'Name')
+        if (!qName) continue
+
+        let qValue: string | number | boolean | null = null
+        for (const key of QTY_VALUE_KEYS) {
+          const raw = q[key]
+          if (raw !== null && raw !== undefined) {
+            const n = unwrapNumber(raw)
+            if (n !== undefined) { qValue = n; break }
+          }
+        }
+
+        const unitString = q['Unit'] ? unwrapString(q['Unit']) : undefined
+        props.push({ set: psetName, name: qName, value: qValue, ...(unitString ? { unit: unitString } : {}) })
+      }
     }
   }
 
   return props
 }
 
+// ─── Raw item type ────────────────────────────────────────────────────────────
+
+type RawItem = Record<string, unknown>
+
+/**
+ * Safely iterate the items returned by getItemsData.
+ * The API returns either an array or a keyed-by-localId object.
+ */
+function iterateRawItems(raw: unknown): RawItem[] {
+  if (Array.isArray(raw)) {
+    return (raw as unknown[]).filter(
+      (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
+    )
+  }
+  if (raw !== null && typeof raw === 'object') {
+    return Object.values(raw as Record<string, unknown>).filter(
+      (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
+    )
+  }
+  return []
+}
+
+// ─── Spatial tree extraction ──────────────────────────────────────────────────
+
+/**
+ * Builds the IFCSpatialTree from the loaded FragmentsModel.
+ *
+ * FIXED: That Open Engine stores relations as direct object references.
+ *
+ * item['IsDecomposedBy']  = [ <child spatial node item>, ... ]
+ * item['ContainsElements'] = [ <contained physical element item>, ... ]
+ * item['HasOpenings']      = [ <opening element item>, ... ]    (on walls etc.)
+ * item['HasFillings']      = [ <door/window item>, ... ]        (on openings)
+ *
+ * There is NO intermediate IfcRelAggregates object — the library resolved
+ * it to the direct related items when building the fragment binary.
+ */
+async function extractSpatialTree(model: FRAGS.FragmentsModel): Promise<IFCSpatialTree> {
+  const empty: IFCSpatialTree = {
+    rootIds:           [],
+    spatialNodes:      new Map(),
+    elementsByStorey:  new Map(),
+    storeyByElement:   new Map(),
+    elementToOpenings: new Map(),
+    openingToFillers:  new Map(),
+    openingDetails:    new Map(),
+  }
+
+  // ── Step 1: localIds for spatial structure types ──────────────────────────
+  let spatialCatMap: Record<string, number[]> = {}
+  try {
+    spatialCatMap = await (model as unknown as {
+      getItemsOfCategories(r: RegExp[]): Promise<Record<string, number[]>>
+    }).getItemsOfCategories(SPATIAL_CATEGORY_REGEXPS)
+  } catch (err) {
+    console.warn('[IFCLoader] getItemsOfCategories (spatial) failed:', err)
+    return empty
+  }
+
+  const spatialLocalIds: number[] = []
+  const spatialLocalIdToType = new Map<number, string>()
+
+  for (const [cat, ids] of Object.entries(spatialCatMap)) {
+    for (const id of ids) {
+      spatialLocalIds.push(id)
+      spatialLocalIdToType.set(id, cat)
+    }
+  }
+
+  if (spatialLocalIds.length === 0) {
+    console.warn('[IFCLoader] No spatial structure entities found in model')
+    return empty
+  }
+
+  console.log(`[IFCLoader] Found ${spatialLocalIds.length} spatial entities`)
+
+  // ── Step 2: Fetch spatial nodes with their relations ──────────────────────
+  //
+  // Relation keys (confirmed from @thatopen/fragments 3.4.6 source):
+  //   IsDecomposedBy   → direct array of child spatial node items
+  //   ContainsElements → direct array of contained physical element items
+  //
+  // Values are already-expanded item data objects, NOT intermediate rel entities.
+  //
+  let spatialDataRaw: unknown = {}
+  try {
+    spatialDataRaw = await (model as unknown as {
+      getItemsData(
+        ids:    number[],
+        config: {
+          attributesDefault: boolean
+          relations: Record<string, { attributes: boolean; relations: boolean }>
+        }
+      ): Promise<unknown>
+    }).getItemsData(spatialLocalIds, {
+      attributesDefault: true,
+      relations: {
+        IsDecomposedBy:   { attributes: true, relations: false },
+        ContainsElements: { attributes: true, relations: false },
+      },
+    })
+  } catch (err) {
+    console.warn('[IFCLoader] getItemsData (spatial) failed:', err)
+    return empty
+  }
+
+  const spatialItems = iterateRawItems(spatialDataRaw)
+
+  if (spatialItems.length === 0) {
+    console.warn('[IFCLoader] getItemsData returned 0 spatial items')
+    return empty
+  }
+
+  // ── Step 3: Instrument — print raw keys for first item ───────────────────
+  {
+    const first = spatialItems[0]
+    const cat   = unwrapString(first['_category']) ?? '?'
+    const guid  = unwrapString(first['_guid']) ?? '?'
+    const keys  = Object.keys(first)
+    console.log(`[IFCLoader] First spatial item: category=${cat} guid=${guid}`)
+    console.log(`[IFCLoader] First spatial item keys: [${keys.join(', ')}]`)
+    if (Array.isArray(first['IsDecomposedBy'])) {
+      console.log(`[IFCLoader] IsDecomposedBy count: ${(first['IsDecomposedBy'] as unknown[]).length}`)
+      const child0 = (first['IsDecomposedBy'] as RawItem[])[0]
+      if (child0) console.log(`[IFCLoader] IsDecomposedBy[0] keys: [${Object.keys(child0).join(', ')}]`)
+    } else {
+      console.log(`[IFCLoader] IsDecomposedBy: not an array →`, typeof first['IsDecomposedBy'])
+    }
+    if (Array.isArray(first['ContainsElements'])) {
+      console.log(`[IFCLoader] ContainsElements count: ${(first['ContainsElements'] as unknown[]).length}`)
+    }
+  }
+
+  // ── Step 4: Build spatial node map ───────────────────────────────────────
+  const spatialNodes = new Map<string, IFCSpatialNode>()
+
+  for (const item of spatialItems) {
+    const globalId = unwrapString(item['_guid'])
+    if (!globalId) continue
+
+    const expressId = unwrapNumber(item['_localId'])
+    const rawCat    = unwrapString(item['_category'])
+      ?? (expressId !== undefined ? spatialLocalIdToType.get(expressId) : undefined)
+      ?? 'IFCBUILDINGELEMENTPROXY'
+    const ifcType   = categoryKeyToIfcType(rawCat)
+    const name      = readAttr(item, 'Name') ?? ifcType
+
+    spatialNodes.set(globalId, {
+      globalId,
+      expressId,
+      name,
+      ifcType,
+      childGlobalIds: [],   // populated in Step 5
+    })
+  }
+
+  // ── Step 5: Resolve relationships ─────────────────────────────────────────
+  //
+  // IsDecomposedBy items ARE the child spatial nodes directly.
+  // ContainsElements items ARE the physical elements directly.
+  //
+  const elementsByStorey = new Map<string, string[]>()
+  const storeyByElement  = new Map<string, string>()
+
+  let aggregateCount    = 0
+  let containmentCount  = 0
+
+  for (const item of spatialItems) {
+    const parentGlobalId = unwrapString(item['_guid'])
+    if (!parentGlobalId) continue
+
+    const parentNode = spatialNodes.get(parentGlobalId)
+    if (!parentNode) continue
+
+    // ── IsDecomposedBy → child spatial nodes (FIXED) ─────────────────────
+    // Each entry in this array IS a child spatial node item.
+    const isDecomposedBy = item['IsDecomposedBy']
+    if (Array.isArray(isDecomposedBy)) {
+      for (const childItem of isDecomposedBy as RawItem[]) {
+        if (!childItem || typeof childItem !== 'object') continue
+        const childGlobalId = unwrapString(childItem['_guid'])
+        if (!childGlobalId) continue
+        if (!parentNode.childGlobalIds.includes(childGlobalId)) {
+          parentNode.childGlobalIds.push(childGlobalId)
+          aggregateCount++
+        }
+      }
+    }
+
+    // ── ContainsElements → physical elements (FIXED) ─────────────────────
+    // Each entry IS a physical element item.
+    const containsElements = item['ContainsElements']
+    if (Array.isArray(containsElements)) {
+      if (!elementsByStorey.has(parentGlobalId)) {
+        elementsByStorey.set(parentGlobalId, [])
+      }
+      const bucket = elementsByStorey.get(parentGlobalId)!
+
+      for (const elItem of containsElements as RawItem[]) {
+        if (!elItem || typeof elItem !== 'object') continue
+        const elGlobalId = unwrapString(elItem['_guid'])
+        if (!elGlobalId) continue
+        bucket.push(elGlobalId)
+        storeyByElement.set(elGlobalId, parentGlobalId)
+        containmentCount++
+      }
+    }
+  }
+
+  // ── Step 6: Identify root nodes ────────────────────────────────────────────
+  // A root node has no parent — i.e. no other spatial node's childGlobalIds includes it.
+  const nonRootIds = new Set<string>()
+  for (const node of spatialNodes.values()) {
+    for (const childId of node.childGlobalIds) {
+      nonRootIds.add(childId)
+    }
+  }
+
+  const rootIds: string[] = []
+  for (const globalId of spatialNodes.keys()) {
+    if (!nonRootIds.has(globalId)) rootIds.push(globalId)
+  }
+
+  // ── Step 7: Debug summary ─────────────────────────────────────────────────
+  const orphanCount = Array.from(spatialNodes.keys()).filter(
+    id => !rootIds.includes(id) && !nonRootIds.has(id)
+  ).length
+
+  console.log('\n[IFCLoader] ── Relationship graph ──────────────────────────────────')
+  for (const node of spatialNodes.values()) {
+    if (node.childGlobalIds.length > 0) {
+      console.log(`  ${node.ifcType} "${node.name}"`)
+      for (const childId of node.childGlobalIds) {
+        const child = spatialNodes.get(childId)
+        console.log(`      → ${child?.ifcType ?? '?'} "${child?.name ?? childId}"`)
+      }
+    }
+    const contained = elementsByStorey.get(node.globalId)
+    if (contained && contained.length > 0) {
+      console.log(`  ${node.ifcType} "${node.name}" contains:`)
+      const byType = new Map<string, number>()
+      for (const gid of contained) {
+        // We don't have type info here since elements are in a separate pass
+        // Just count
+        byType.set(gid, (byType.get(gid) ?? 0) + 1)
+      }
+      console.log(`      ${contained.length} elements`)
+    }
+  }
+
+  console.log('\n[IFCLoader] ── Spatial tree summary ────────────────────────────────')
+  console.log(`  Spatial nodes:               ${spatialNodes.size}`)
+  console.log(`  Root nodes:                  ${rootIds.length}`)
+  console.log(`  Orphan nodes:                ${orphanCount}`)
+  console.log(`  IfcRelAggregates resolved:   ${aggregateCount}`)
+  console.log(`  ContainsElements resolved:   ${containmentCount}`)
+  console.log(`  Storeys with elements:       ${elementsByStorey.size}`)
+  for (const rootId of rootIds) {
+    const root = spatialNodes.get(rootId)
+    console.log(`  Root: ${root?.ifcType} "${root?.name}"`)
+  }
+  console.log('')
+
+  return {
+    rootIds,
+    spatialNodes,
+    elementsByStorey,
+    storeyByElement,
+    elementToOpenings: new Map(),   // populated by extractVoidFillRelations()
+    openingToFillers:  new Map(),
+    openingDetails:    new Map(),
+  }
+}
+
+// ─── Opening/void extraction ──────────────────────────────────────────────────
+
+/**
+ * For each physical element, fetches HasOpenings (voids in walls/slabs)
+ * and for each opening, fetches HasFillings (doors/windows).
+ *
+ * Returns:
+ *   elementToOpenings: Map<elementGlobalId, openingGlobalId[]>
+ *   openingToFillers:  Map<openingGlobalId, fillerGlobalId[]>
+ *   openingDetails:    Map<openingGlobalId, { name, ifcType }>
+ */
+async function extractVoidFillRelations(
+  model:        FRAGS.FragmentsModel,
+  elementGlobalIds: string[]
+): Promise<{
+  elementToOpenings: Map<string, string[]>
+  openingToFillers:  Map<string, string[]>
+  openingDetails:    Map<string, { name: string; ifcType: string }>
+}> {
+  const elementToOpenings = new Map<string, string[]>()
+  const openingToFillers  = new Map<string, string[]>()
+  const openingDetails    = new Map<string, { name: string; ifcType: string }>()
+
+  if (elementGlobalIds.length === 0) {
+    return { elementToOpenings, openingToFillers, openingDetails }
+  }
+
+  // Get localIds for openings separately
+  let openingCatMap: Record<string, number[]> = {}
+  try {
+    openingCatMap = await (model as unknown as {
+      getItemsOfCategories(r: RegExp[]): Promise<Record<string, number[]>>
+    }).getItemsOfCategories(OPENING_CATEGORY_REGEXPS)
+  } catch {
+    return { elementToOpenings, openingToFillers, openingDetails }
+  }
+
+  const openingLocalIds: number[] = []
+  for (const ids of Object.values(openingCatMap)) {
+    openingLocalIds.push(...ids)
+  }
+
+  if (openingLocalIds.length === 0) {
+    return { elementToOpenings, openingToFillers, openingDetails }
+  }
+
+  // Fetch opening items with HasFillings relation
+  let openingDataRaw: unknown = {}
+  try {
+    openingDataRaw = await (model as unknown as {
+      getItemsData(
+        ids:    number[],
+        config: { attributesDefault: boolean; relations: Record<string, { attributes: boolean; relations: boolean }> }
+      ): Promise<unknown>
+    }).getItemsData(openingLocalIds, {
+      attributesDefault: true,
+      relations: {
+        HasFillings:   { attributes: true, relations: false },
+        VoidsElements: { attributes: true, relations: false },
+      },
+    })
+  } catch {
+    return { elementToOpenings, openingToFillers, openingDetails }
+  }
+
+  const openingItems = iterateRawItems(openingDataRaw)
+  let fillingCount = 0
+  let voidCount    = 0
+
+  for (const item of openingItems) {
+    const openingGuid = unwrapString(item['_guid'])
+    if (!openingGuid) continue
+
+    const rawCat  = unwrapString(item['_category']) ?? 'IFCOPENINGELEMENT'
+    const ifcType = categoryKeyToIfcType(rawCat)
+    const name    = readAttr(item, 'Name') ?? 'Opening'
+    openingDetails.set(openingGuid, { name, ifcType })
+
+    // VoidsElements → the wall/slab this opening is cut into
+    const voidsElements = item['VoidsElements']
+    if (Array.isArray(voidsElements)) {
+      for (const elItem of voidsElements as RawItem[]) {
+        const elGuid = unwrapString(elItem['_guid'])
+        if (!elGuid) continue
+        if (!elementToOpenings.has(elGuid)) elementToOpenings.set(elGuid, [])
+        if (!elementToOpenings.get(elGuid)!.includes(openingGuid)) {
+          elementToOpenings.get(elGuid)!.push(openingGuid)
+          voidCount++
+        }
+      }
+    }
+
+    // HasFillings → the doors/windows filling this opening
+    const hasFillings = item['HasFillings']
+    if (Array.isArray(hasFillings)) {
+      if (!openingToFillers.has(openingGuid)) openingToFillers.set(openingGuid, [])
+      for (const fItem of hasFillings as RawItem[]) {
+        const fGuid = unwrapString(fItem['_guid'])
+        if (!fGuid) continue
+        if (!openingToFillers.get(openingGuid)!.includes(fGuid)) {
+          openingToFillers.get(openingGuid)!.push(fGuid)
+          fillingCount++
+        }
+      }
+    }
+  }
+
+  console.log(`[IFCLoader] Void/fill: ${openingItems.length} openings, ${voidCount} voids, ${fillingCount} fillings`)
+
+  return { elementToOpenings, openingToFillers, openingDetails }
+}
+
 // ─── IFCLoaderWrapper ─────────────────────────────────────────────────────────
 
 export class IFCLoaderWrapper {
-  /**
-   * Extracts normalized IFCObject[] from a loaded FragmentsModel.
-   *
-   * Pipeline:
-   *
-   *  1. model.getItemsOfCategories(ELEMENT_CATEGORY_REGEXPS)
-   *       → { [categoryKey]: localId[] }
-   *
-   *  2. Collect all localIds → category lookup.
-   *
-   *  3. model.getItemsData(localIds, config)
-   *
-   *       CONFIRMED item shape (@thatopen/components 3.4.6 / web-ifc 0.0.77):
-   *
-   *         {
-   *           _guid:       { value: "1F6umJ5H50aeL3A1As_wUF" },
-   *           _localId:    { value: 572 },
-   *           _category:   { value: "IFCDOOR" },
-   *           Name:        { value: "M_Single-Flush:Outside door:346843", type: "IFCLABEL" },
-   *           ObjectType:  { value: "M_Single-Flush:Outside door",        type: "IFCLABEL" },
-   *           Tag:         { value: "346843",                             type: "IFCIDENTIFIER" },
-   *           Description: { value: null, ... },
-   *           // ... further wrapped attrs
-   *         }
-   *
-   *       Every field — including _guid, _localId, _category — is a
-   *       { value: <primitive> } wrapper object.  None are bare primitives.
-   *       All are unwrapped via unwrapString() / unwrapNumber().
-   *
-   *  4. mapRawArrayToIFCObjects() normalises into the app's IFCObject type.
-   */
+
   async extractObjects(model: FRAGS.FragmentsModel): Promise<IFCObject[]> {
 
-    // ── Step 1: Get physical product localIds, grouped by category ────────
+    // Step 1: Get physical product localIds
     let categoryMap: Record<string, number[]> = {}
     try {
       categoryMap = await (model as unknown as {
@@ -9283,8 +10465,7 @@ export class IFCLoaderWrapper {
       return []
     }
 
-    // ── Step 2: Build flat localId[] and localId → category lookup ────────
-    const localIds:    number[] = []
+    const localIds:     number[] = []
     const localIdToCat = new Map<number, string>()
 
     for (const [cat, ids] of Object.entries(categoryMap)) {
@@ -9304,16 +10485,13 @@ export class IFCLoaderWrapper {
       `across ${Object.keys(categoryMap).length} categories`
     )
 
-    // ── Step 3: Fetch attributes + Psets for all products in one call ─────
+    // Step 2: Fetch attributes + Psets
     let itemDataRaw: unknown = {}
     try {
       itemDataRaw = await (model as unknown as {
         getItemsData(
           ids:    number[],
-          config: {
-            attributesDefault: boolean
-            relations: Record<string, { attributes: boolean; relations: boolean }>
-          }
+          config: { attributesDefault: boolean; relations: Record<string, { attributes: boolean; relations: boolean }> }
         ): Promise<unknown>
       }).getItemsData(localIds, {
         attributesDefault: true,
@@ -9325,10 +10503,7 @@ export class IFCLoaderWrapper {
       console.warn('[IFCLoaderWrapper] getItemsData with Psets failed, retrying attributes-only:', err)
       try {
         itemDataRaw = await (model as unknown as {
-          getItemsData(
-            ids:    number[],
-            config: { attributesDefault: boolean }
-          ): Promise<unknown>
+          getItemsData(ids: number[], config: { attributesDefault: boolean }): Promise<unknown>
         }).getItemsData(localIds, { attributesDefault: true })
       } catch (err2) {
         console.error('[IFCLoaderWrapper] getItemsData attributes-only also failed:', err2)
@@ -9336,98 +10511,32 @@ export class IFCLoaderWrapper {
       }
     }
 
-    // ── Step 3b: Detect top-level shape and build a unified item iterator ──
-    //
-    // Top-level is either:
-    //   Array  → items positionally aligned with localIds[]
-    //   Object → items keyed by localId string
-    //
-    // In both cases each item has the confirmed shape above.
+    const items = iterateRawItems(itemDataRaw)
 
-    console.log('[IFCLoaderWrapper] getItemsData typeof:', typeof itemDataRaw, '| isArray:', Array.isArray(itemDataRaw))
-
-    type RawItem = Record<string, unknown>
-
-    let iterItems: () => Iterable<RawItem>
-
-    if (Array.isArray(itemDataRaw)) {
-      const arr = itemDataRaw as unknown[]
-      console.log('[IFCLoaderWrapper] getItemsData returned array, length:', arr.length)
-      if (arr.length > 0) {
-        const s = arr[0]
-        if (s && typeof s === 'object' && !Array.isArray(s)) {
-          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0] keys:', Object.keys(s as object))
-          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._guid:', (s as RawItem)['_guid'])
-          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._localId:', (s as RawItem)['_localId'])
-          console.log('[IFCLoaderWrapper] INSTRUMENT arr[0]._category:', (s as RawItem)['_category'])
-        }
-      }
-      iterItems = () => arr.filter(
-        (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
-      )
-    } else if (itemDataRaw !== null && typeof itemDataRaw === 'object') {
-      const map = itemDataRaw as Record<string, unknown>
-      const keys = Object.keys(map)
-      console.log('[IFCLoaderWrapper] getItemsData returned keyed map, key count:', keys.length)
-      if (keys.length > 0) {
-        const s = map[keys[0]]
-        if (s && typeof s === 'object' && !Array.isArray(s)) {
-          console.log('[IFCLoaderWrapper] INSTRUMENT map[0] keys:', Object.keys(s as object))
-          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._guid:', (s as RawItem)['_guid'])
-          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._localId:', (s as RawItem)['_localId'])
-          console.log('[IFCLoaderWrapper] INSTRUMENT map[0]._category:', (s as RawItem)['_category'])
-        }
-      }
-      iterItems = () => Object.values(map).filter(
-        (el): el is RawItem => el !== null && typeof el === 'object' && !Array.isArray(el)
-      )
-    } else {
-      console.error('[IFCLoaderWrapper] getItemsData returned unexpected type:', typeof itemDataRaw)
+    if (items.length === 0) {
+      console.error('[IFCLoaderWrapper] getItemsData returned no items')
       return this.fallbackToGuidsOnly(model, localIds, localIdToCat)
     }
 
-    // ── Step 4: Normalise into RawIFCData ─────────────────────────────────
-    //
-    // Every field is a { value: <primitive> } wrapper — including _guid,
-    // _localId, and _category.  All are unwrapped via unwrapString() /
-    // unwrapNumber() before use.  No field is read as a bare primitive.
-
     const rawItems: Parameters<typeof mapRawArrayToIFCObjects>[0] = []
 
-    for (const item of iterItems()) {
-      // ── Instrument ─────────────────────────────────────────────────────
-      console.log('[IFCLoaderWrapper] INSTRUMENT item keys:', Object.keys(item))
-      console.log('  _guid:', item['_guid'], '| _localId:', item['_localId'], '| _category:', item['_category'])
-      console.log('  Name:', item['Name'], '| ObjectType:', item['ObjectType'], '| Tag:', item['Tag'])
-
-      // ── GlobalId — unwrap _guid.value ──────────────────────────────────
+    for (const item of items) {
       const globalId = unwrapString(item['_guid'])
-      if (!globalId) {
-        console.warn('  SKIP: _guid.value missing or empty')
-        continue
-      }
+      if (!globalId) continue
 
-      // ── ExpressId — unwrap _localId.value as a number ──────────────────
-      const expressId = unwrapNumber(item['_localId'])
-
-      // ── IFC type — unwrap _category.value, fall back to localIdToCat ───
+      const expressId      = unwrapNumber(item['_localId'])
       const rawCatFromItem = unwrapString(item['_category'])
       const rawCat = rawCatFromItem
         ?? (expressId !== undefined ? localIdToCat.get(expressId) : undefined)
         ?? 'IFCBUILDINGELEMENTPROXY'
       const ifcType = categoryKeyToIfcType(rawCat)
 
-      // ── Named attribute fields — all wrapped; readAttr() unwraps them ───
       const name           = readAttr(item, 'Name')         ?? 'Unnamed'
       const tag            = readAttr(item, 'Tag')
       const description    = readAttr(item, 'Description')
       const objectType     = readAttr(item, 'ObjectType')
       const predefinedType = readAttr(item, 'PredefinedType')
-
-      // ── Psets ───────────────────────────────────────────────────────────
-      const properties = extractPsets(item)
-
-      console.log(`  → ACCEPTED globalId=${globalId} expressId=${expressId} name="${name}" type=${ifcType}`)
+      const properties     = extractPsets(item)
 
       rawItems.push({
         globalId,
@@ -9447,25 +10556,39 @@ export class IFCLoaderWrapper {
   }
 
   /**
-   * Last-resort fallback: produce minimal IFCObjects using only
-   * getGuidsByLocalIds(). Names will be 'Unnamed' but count and type correct.
+   * Extracts the IFC spatial decomposition tree.
+   * Reads IFCRELAGGREGATES (IsDecomposedBy) and
+   * IFCRELCONTAINEDINSPATIALSTRUCTURE (ContainsElements).
    */
+  async extractSpatialTree(model: FRAGS.FragmentsModel): Promise<IFCSpatialTree> {
+    return extractSpatialTree(model)
+  }
+
+  /**
+   * Extracts void/fill relationships.
+   * Returns opening elements and their fillers (doors, windows).
+   */
+  async extractVoidFillRelations(
+    model: FRAGS.FragmentsModel,
+    elementGlobalIds: string[]
+  ) {
+    return extractVoidFillRelations(model, elementGlobalIds)
+  }
+
   private async fallbackToGuidsOnly(
     model:         FRAGS.FragmentsModel,
     localIds:      number[],
     localIdToCat:  Map<number, string>
   ): Promise<IFCObject[]> {
     try {
-      const guids = await model.getGuidsByLocalIds(localIds)
+      const guids    = await model.getGuidsByLocalIds(localIds)
       const rawItems: Parameters<typeof mapRawArrayToIFCObjects>[0] = []
 
       localIds.forEach((localId, i) => {
         const globalId = guids[i]
         if (typeof globalId !== 'string' || globalId.length === 0) return
-
         const rawCat  = localIdToCat.get(localId) ?? 'IFCBUILDINGELEMENTPROXY'
         const ifcType = categoryKeyToIfcType(rawCat)
-
         rawItems.push({ globalId, expressId: localId, name: 'Unnamed', type: ifcType })
       })
 

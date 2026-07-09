@@ -33,16 +33,36 @@ interface ViewerState {
   /** Current render mode */
   renderMode:       RenderMode
 
+  /**
+   * Engine action: zoom the camera to fit a single IFC object.
+   * Set by IFCViewer once the ViewerEngine is ready.
+   * null when no engine is mounted.
+   */
+  zoomToObject:     ((globalId: string) => void) | null
+
+  /**
+   * Engine action: isolate one or more IFC objects (hide all others).
+   * Passing an empty array restores full visibility.
+   * Set by IFCViewer once the ViewerEngine is ready.
+   * null when no engine is mounted.
+   */
+  isolateObjects:   ((globalIds: string[]) => void) | null
+
   // ── Actions ──────────────────────────────────────────────
-  setIFCObjects:      (objects: IFCObject[]) => void
-  setSpatialTree:     (tree: IFCSpatialTree | null) => void
-  setModelLoadState:  (state: ModelLoadState) => void
-  setModelError:      (error: string | null) => void
-  setModelMeta:       (fileName: string, fileSize: number) => void
-  setSceneReady:      (ready: boolean) => void
-  setRenderMode:      (mode: RenderMode) => void
-  resetModel:         () => void
-  getObjectByGlobalId:(globalId: string) => IFCObject | undefined
+  setIFCObjects:       (objects: IFCObject[]) => void
+  setSpatialTree:      (tree: IFCSpatialTree | null) => void
+  setModelLoadState:   (state: ModelLoadState) => void
+  setModelError:       (error: string | null) => void
+  setModelMeta:        (fileName: string, fileSize: number) => void
+  setSceneReady:       (ready: boolean) => void
+  setRenderMode:       (mode: RenderMode) => void
+  setEngineActions:    (
+    zoom: (globalId: string) => void,
+    isolate: (globalIds: string[]) => void
+  ) => void
+  clearEngineActions:  () => void
+  resetModel:          () => void
+  getObjectByGlobalId: (globalId: string) => IFCObject | undefined
 }
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
@@ -54,6 +74,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   modelFileSize:   null,
   sceneReady:      false,
   renderMode:      'perspective',
+  zoomToObject:    null,
+  isolateObjects:  null,
 
   setIFCObjects:     (objects) => set({ ifcObjects: objects }),
   setSpatialTree:    (tree)    => set({ spatialTree: tree }),
@@ -63,6 +85,16 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setSceneReady:     (ready)   => set({ sceneReady: ready }),
   setRenderMode:     (mode)    => set({ renderMode: mode }),
 
+  setEngineActions: (zoom, isolate) => set({
+    zoomToObject:   zoom,
+    isolateObjects: isolate,
+  }),
+
+  clearEngineActions: () => set({
+    zoomToObject:   null,
+    isolateObjects: null,
+  }),
+
   resetModel: () => set({
     ifcObjects:    [],
     spatialTree:   null,
@@ -70,6 +102,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     modelError:    null,
     modelFileName: null,
     modelFileSize: null,
+    zoomToObject:  null,
+    isolateObjects: null,
   }),
 
   getObjectByGlobalId: (globalId) =>
