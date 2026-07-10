@@ -473,14 +473,27 @@ const TreeRow = memo(function TreeRow({
 // ─── Virtual list ─────────────────────────────────────────────────────────────
 
 function VirtualList({
-  rowIds, nodes, expandedIds, selectedGlobalId, onToggle, onSelect,
+  rowIds, nodes, expandedIds, selectedGlobalId, scrollToNodeId, onToggle, onSelect,
 }: {
-  rowIds: string[]; nodes: Map<string, DisplayNode>; expandedIds: Set<string>
-  selectedGlobalId: string | null; onToggle: (id: string) => void; onSelect: (globalId: string) => void
+  rowIds: string[]
+  nodes: Map<string, DisplayNode>
+  expandedIds: Set<string>
+  selectedGlobalId: string | null
+  /**
+   * When this value changes, the list scrolls to the row whose node.id
+   * equals this value, keeping the selected item visible.
+   * Only fires when selection originates outside the tree (Model → Tree).
+   */
+  scrollToNodeId: string | null
+  onToggle: (id: string) => void
+  onSelect: (globalId: string) => void
 }) {
   const scrollRef             = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [height,    setHeight]    = useState(400)
+
+  // Track what we last scrolled to so we don't re-scroll on every render
+  const lastScrolledNodeRef = useRef<string | null>(null)
 
   useEffect(() => {
     const el = scrollRef.current
@@ -489,6 +502,48 @@ function VirtualList({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  // ── Scroll-to-selected: Model → Tree direction ───────────────────────────
+  //
+  // When scrollToNodeId changes (set by the parent after expanding ancestors),
+  // find the row index for that node in the current rowIds array and
+  // programmatically scroll the container so the row is centered in view.
+  //
+  // We use a small setTimeout(0) to let React flush the expanded ancestors
+  // first (which may have added new rows to rowIds before this effect runs),
+  // then scroll. This is necessary because buildVisibleRows is recalculated
+  // synchronously on the same render cycle that sets expandedIds, so by the
+  // time the effect fires, the new rowIds are already correct in the DOM.
+  //
+  useEffect(() => {
+    if (!scrollToNodeId) return
+    if (scrollToNodeId === lastScrolledNodeRef.current) return
+
+    // Small defer: let the DOM settle after ancestor expansion
+    const frameId = requestAnimationFrame(() => {
+      const idx = rowIds.indexOf(scrollToNodeId)
+      if (idx === -1) return   // node not visible (shouldn't happen after expansion)
+
+      const el = scrollRef.current
+      if (!el) return
+
+      const rowTop    = idx * ROW_HEIGHT
+      const rowBottom = rowTop + ROW_HEIGHT
+      const viewTop   = el.scrollTop
+      const viewBottom = viewTop + el.clientHeight
+
+      // Only scroll if the row is outside the visible viewport
+      if (rowTop < viewTop || rowBottom > viewBottom) {
+        // Center the selected row in the viewport
+        const targetScrollTop = rowTop - el.clientHeight / 2 + ROW_HEIGHT / 2
+        el.scrollTop = Math.max(0, targetScrollTop)
+      }
+
+      lastScrolledNodeRef.current = scrollToNodeId
+    })
+
+    return () => cancelAnimationFrame(frameId)
+  }, [scrollToNodeId, rowIds])
 
   const handleScroll = useCallback(() => { setScrollTop(scrollRef.current?.scrollTop ?? 0) }, [])
 
@@ -531,8 +586,32 @@ export default function IFCObjectTree() {
   const primaryGlobalId = useSelectionStore(s => s.primaryGlobalId)
   const selectObject    = useSelectionStore(s => s.selectObject)
 
+  /**
+   * zoomToObject — the same callback the Inspector's Zoom button uses.
+   * Registered by IFCViewer into the store once the engine is ready.
+   * May be null before the engine initialises — optional-chain guards below.
+   */
+  const zoomToObject    = useViewerStore(s => s.zoomToObject)
+
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
+
+  /**
+   * scrollToNodeId — the display-node ID the VirtualList should scroll to.
+   *
+   * Set only when selection originates from the Model (or Gantt), not from
+   * a click inside the tree itself. This prevents the list from jumping when
+   * the user is navigating the tree by clicking rows.
+   */
+  const [scrollToNodeId, setScrollToNodeId] = useState<string | null>(null)
+
+  /**
+   * Flag that tracks whether the most recent selection change was initiated
+   * by a click inside the tree itself. When true we skip the scroll-to logic.
+   *
+   * We use a ref (not state) so it does not trigger additional renders.
+   */
+  const treeInitiatedSelectRef = useRef(false)
 
   const objectMap = useMemo<Map<string, IFCObject>>(() => {
     const m = new Map<string, IFCObject>()
@@ -553,10 +632,10 @@ export default function IFCObjectTree() {
     return { nodes: new Map<string, DisplayNode>(), rootIds: [] as string[] }
   }, [spatialTree, ifcObjects, objectMap, modelName])
 
+  // ── Auto-expand on model load ────────────────────────────────────────────
   useEffect(() => {
     if (modelLoadState === 'idle') { setExpandedIds(new Set()); setSearchQuery(''); return }
     if (modelLoadState === 'loaded' && rootIds.length > 0) {
-      // Auto-expand root + first two levels
       const initial = new Set<string>()
       function expand(id: string, depth: number): void {
         if (depth > 2) return
@@ -568,27 +647,68 @@ export default function IFCObjectTree() {
     }
   }, [modelLoadState, rootIds, nodes])
 
+  // ── Bidirectional sync: selection changes → expand ancestors + scroll ────
+  //
+  // This effect fires whenever primaryGlobalId changes in the store.
+  // It handles BOTH directions:
+  //
+  //   Tree → Model: the user clicked a tree row.
+  //     treeInitiatedSelectRef.current = true (set in handleSelect below).
+  //     We still expand ancestors (so the tree state is consistent), but
+  //     we do NOT update scrollToNodeId (the user already clicked the row,
+  //     no scroll is needed — their viewport is already there).
+  //
+  //   Model → Tree (or Gantt → Tree): selection changed externally.
+  //     treeInitiatedSelectRef.current = false.
+  //     We expand ancestors AND set scrollToNodeId so VirtualList scrolls.
+  //
   const prevSelectedRef = useRef<string | null>(null)
+
   useEffect(() => {
-    if (!primaryGlobalId || primaryGlobalId === prevSelectedRef.current) return
+    if (!primaryGlobalId || primaryGlobalId === prevSelectedRef.current) {
+      // Reset flag when selection clears
+      if (!primaryGlobalId) treeInitiatedSelectRef.current = false
+      return
+    }
     prevSelectedRef.current = primaryGlobalId
 
-    // The leaf node for a selected element may have id = "leaf:storeyId:globalId"
-    // Find it by looking for a node whose globalId matches
+    // Find the display node whose globalId matches the selected element.
+    // Prefer leaf nodes (id starts with "leaf:") over spatial nodes so
+    // we land at the deepest visible position in the tree.
     let targetId: string | undefined
+    let leafId:   string | undefined
+
     for (const [id, node] of nodes) {
-      if (node.globalId === primaryGlobalId) { targetId = id; break }
+      if (node.globalId === primaryGlobalId) {
+        targetId = id
+        if (id.startsWith('leaf:')) {
+          leafId = id
+          break   // leaf found — stop searching
+        }
+      }
     }
-    if (!targetId) return
 
-    const ancestors = getAncestorIds(nodes, targetId)
-    if (ancestors.size === 0) return
+    // Prefer a leaf node when one exists
+    const resolvedId = leafId ?? targetId
+    if (!resolvedId) return
 
-    setExpandedIds(prev => {
-      const next = new Set(prev)
-      ancestors.forEach(id => next.add(id))
-      return next
-    })
+    // Always expand ancestors to make the node visible in the tree
+    const ancestors = getAncestorIds(nodes, resolvedId)
+    if (ancestors.size > 0) {
+      setExpandedIds(prev => {
+        const next = new Set(prev)
+        ancestors.forEach(id => next.add(id))
+        return next
+      })
+    }
+
+    // Only scroll when selection did NOT originate in the tree
+    if (!treeInitiatedSelectRef.current) {
+      setScrollToNodeId(resolvedId)
+    }
+
+    // Reset the flag for the next selection event
+    treeInitiatedSelectRef.current = false
   }, [primaryGlobalId, nodes])
 
   const visibleRowIds = useMemo(
@@ -599,7 +719,30 @@ export default function IFCObjectTree() {
   const handleToggle      = useCallback((id: string) => {
     setExpandedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
   }, [])
-  const handleSelect      = useCallback((globalId: string) => selectObject(globalId, false), [selectObject])
+
+  /**
+   * handleSelect — called when the user clicks a row in the tree.
+   *
+   * Sets treeInitiatedSelectRef = true BEFORE calling selectObject so that
+   * the subsequent primaryGlobalId change (in the useEffect above) knows
+   * the selection came from the tree and should NOT trigger a scroll.
+   *
+   * Auto-zoom: after selecting, the camera automatically frames the object
+   * using the same zoomToObject callback the Inspector's Zoom button uses.
+   * Only fires when the selected object actually changes (prevSelectedRef
+   * guard) to avoid needless camera movement on repeated clicks of the same
+   * node. Multi-select is never triggered from the tree (always false here).
+   */
+  const handleSelect = useCallback((globalId: string) => {
+    treeInitiatedSelectRef.current = true
+    selectObject(globalId, false)
+
+    // Auto-zoom only when selecting a different object
+    if (globalId !== prevSelectedRef.current) {
+      zoomToObject?.(globalId)
+    }
+  }, [selectObject, zoomToObject])
+
   const handleExpandAll   = useCallback(() => setExpandedIds(new Set(nodes.keys())), [nodes])
   const handleCollapseAll = useCallback(() => setExpandedIds(new Set()), [])
 
@@ -645,6 +788,7 @@ export default function IFCObjectTree() {
           nodes={nodes}
           expandedIds={expandedIds}
           selectedGlobalId={primaryGlobalId}
+          scrollToNodeId={scrollToNodeId}
           onToggle={handleToggle}
           onSelect={handleSelect}
         />

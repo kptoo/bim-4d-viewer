@@ -1,17 +1,3 @@
-/* ============================================================
-   zones.css
-   Styles for the Zone management UI.
-
-   Import this in App.css (or replace layers.css import):
-     @import './styles/zones.css';
-
-   All class names are prefixed with .zone- or .insp-zone-
-   to avoid collision with any existing styles.
-   ============================================================ */
-
-/* ── Panel tab badge (count indicator) ───────────────────────
-   Used on the "Zones" tab to show active filter count.         */
-
 .panel-tab__badge {
   background:    var(--accent-blue);
   border-radius: 8px;
@@ -48,12 +34,31 @@
   overflow:       hidden;
 }
 
-/* ── Sticky zone: header + create form ───────────────────────
-   Never scrolls. Contains the panel title and the new-zone
-   creation form.                                               */
+/* ── Sticky zone: header + create form + assign section ────────
+   flex-shrink: 0  — never compressed by flex layout.
+   overflow-y: auto — if the sticky content is ever taller than
+   max-height (e.g. on a very small panel), it scrolls internally
+   rather than pushing the zone list scroll zone to zero height.
+   max-height: 55% — caps how much of the panel the sticky section
+   can occupy, guaranteeing the zone list always has visible space.
+   This value comfortably fits the header + create form +
+   assign section at typical panel sizes while preventing the
+   sticky section from growing unboundedly when the assign section
+   has verbose content (success/error messages, multi-line hints). */
 
 .zone-panel__sticky {
   flex-shrink: 0;
+  max-height:  55%;
+  overflow-y:  auto;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+
+.zone-panel__sticky::-webkit-scrollbar       { width: 4px; }
+.zone-panel__sticky::-webkit-scrollbar-track  { background: transparent; }
+.zone-panel__sticky::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
 }
 
 /* ── Scroll zone: zone card list ─────────────────────────────
@@ -682,25 +687,25 @@
 }
 
 .zone-chip__name {
-  color:     var(--text-primary);
-  font-size: 11px;
+  color:       var(--text-primary);
+  font-size:   11px;
   font-weight: 500;
 }
 
 .zone-chip__remove {
-  align-items:   center;
-  background:    transparent;
-  border:        none;
-  border-radius: 50%;
-  color:         var(--text-secondary);
-  cursor:        pointer;
-  display:       flex;
-  font-size:     10px;
-  height:        16px;
+  align-items:     center;
+  background:      transparent;
+  border:          none;
+  border-radius:   50%;
+  color:           var(--text-secondary);
+  cursor:          pointer;
+  display:         flex;
+  font-size:       10px;
+  height:          16px;
   justify-content: center;
-  line-height:   1;
-  transition:    color 0.1s, background 0.1s;
-  width:         16px;
+  line-height:     1;
+  transition:      color 0.1s, background 0.1s;
+  width:           16px;
 }
 .zone-chip__remove:hover {
   background: rgba(231, 76, 60, 0.2);
@@ -779,7 +784,7 @@
 
 /* Assigned zones summary row (shown when widget is closed) */
 .insp-zones-summary {
-  align-items:  flex-start;
+  align-items:   flex-start;
   border-bottom: 1px solid var(--border-color);
   display:       flex;
   gap:           10px;
@@ -853,4 +858,168 @@
   line-height: 1.5;
   padding:     20px 14px;
   text-align:  center;
+}
+
+/* ============================================================
+   QUICK ASSIGN SECTION
+   Inline assignment panel inside ZonePanel sticky area.
+   All classes prefixed .zone-quick-assign to avoid collisions.
+   ============================================================ */
+
+.zone-quick-assign {
+  border-bottom:  1px solid var(--border-color);
+  display:        flex;
+  flex-direction: column;
+  gap:            8px;
+  padding:        10px 14px;
+}
+
+/* ── Section title ────────────────────────────────────────────  */
+
+.zone-quick-assign__title {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ── Selection feedback area ──────────────────────────────────  */
+
+.zone-quick-assign__selection {
+  min-height: 34px;
+}
+
+/* No selection state */
+.zone-quick-assign__no-selection {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  line-height: 1.5;
+  margin:      0;
+}
+
+.zone-quick-assign__no-selection-hint {
+  display:   block;
+  font-size: 10px;
+  opacity:   0.7;
+}
+
+/* Active selection state */
+.zone-quick-assign__selected-info {
+  display:        flex;
+  flex-direction: column;
+  gap:            2px;
+}
+
+.zone-quick-assign__selected-label {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.zone-quick-assign__selected-name {
+  color:         var(--text-primary);
+  font-size:     12px;
+  font-weight:   500;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zone-quick-assign__selected-type {
+  color:       var(--accent-blue);
+  font-size:   10px;
+  font-weight: 500;
+}
+
+/* ── Zone dropdown + Assign button row ────────────────────────  */
+
+.zone-quick-assign__controls {
+  display: flex;
+  gap:     6px;
+}
+
+.zone-quick-assign__select {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  cursor:        pointer;
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  outline:       none;
+  padding:       6px 8px;
+  transition:    border-color 0.15s;
+}
+.zone-quick-assign__select:focus    { border-color: var(--accent-blue); }
+.zone-quick-assign__select:disabled { cursor: default; opacity: 0.5; }
+.zone-quick-assign__select option   { background: var(--bg-panel); color: var(--text-primary); }
+
+.zone-quick-assign__btn {
+  align-items:   center;
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  cursor:        pointer;
+  display:       flex;
+  flex-shrink:   0;
+  font-size:     12px;
+  font-weight:   600;
+  gap:           6px;
+  padding:       6px 14px;
+  transition:    background 0.15s, opacity 0.15s;
+  white-space:   nowrap;
+}
+.zone-quick-assign__btn:hover:not(:disabled) { background: #1a5ce8; }
+.zone-quick-assign__btn:disabled             { cursor: default; opacity: 0.4; }
+
+/* Inline spinner inside button */
+.zone-quick-assign__spinner {
+  animation:        spin 0.7s linear infinite;
+  border:           2px solid rgba(255, 255, 255, 0.35);
+  border-radius:    50%;
+  border-top-color: #fff;
+  display:          inline-block;
+  flex-shrink:      0;
+  height:           12px;
+  width:            12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── No zones state ───────────────────────────────────────────  */
+
+.zone-quick-assign__no-zones {
+  color:     var(--text-secondary);
+  font-size: 11px;
+  margin:    0;
+}
+
+/* ── Success message ──────────────────────────────────────────  */
+
+.zone-quick-assign__success {
+  background:    rgba(46, 204, 113, 0.1);
+  border:        1px solid rgba(46, 204, 113, 0.25);
+  border-radius: 5px;
+  color:         var(--accent-green);
+  font-size:     11px;
+  font-weight:   500;
+  padding:       5px 8px;
+}
+
+/* ── Error message ────────────────────────────────────────────  */
+
+.zone-quick-assign__error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     10px;
+  padding:       5px 8px;
 }

@@ -3969,6 +3969,8 @@ FILE: src\App.css
 ====================================================================================================
 
 @import './styles/upload.css';
+@import './styles/layers.css';
+@import './styles/zones.css';
 
 :root {
   --bg-primary: #0D1117;
@@ -5702,6 +5704,7 @@ import { useActivityStore }   from '../store/activity.store'
 import { useLayerStore }      from '../store/layer.store'
 import { useSimulationStore } from '../store/simulation.store'
 import { ifcTypeIcon }        from '../utils/ifc.utils'
+import ZoneAssignWidget       from './zones/ZoneAssignWidget'
 import type { IFCObject, IFCProperty, Activity, SimulationStatus } from '../types'
 
 // ─── Status labels ────────────────────────────────────────────────────────────
@@ -5893,8 +5896,10 @@ export default function IFCInspector() {
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
 
+  // ── Zone assignment widget state ──────────────────────────
+  const [zoneWidgetOpen, setZoneWidgetOpen] = useState(false)
+
   // ── Isolation toggle state ─────────────────────────────────
-  // Tracks whether the current view is in isolation mode.
   const [isIsolated, setIsIsolated] = useState(false)
 
   const ifcObject: IFCObject | undefined | null = primaryGlobalId
@@ -5907,7 +5912,8 @@ export default function IFCInspector() {
       ? getActivitiesForObject(ifcObject.globalId)[0]
       : undefined
 
-  const assignedLayers = ifcObject ? getLayersForObject(ifcObject.globalId) : []
+  // Zones (previously "layers") assigned to this object
+  const assignedZones = ifcObject ? getLayersForObject(ifcObject.globalId) : []
 
   const frames = computeAllFrames(activities)
   const status: SimulationStatus = ifcObject
@@ -5940,7 +5946,6 @@ export default function IFCInspector() {
 
   const handleZoom = useCallback(() => {
     if (!ifcObject || !zoomToObject) return
-    console.log('[IFCInspector] Zoom to', ifcObject.globalId)
     zoomToObject(ifcObject.globalId)
   }, [ifcObject, zoomToObject])
 
@@ -5948,24 +5953,18 @@ export default function IFCInspector() {
     if (!ifcObject || !isolateObjects) return
 
     if (isIsolated) {
-      // Second press — restore full visibility
-      console.log('[IFCInspector] Restore visibility (end isolation)')
       isolateObjects([])
       setIsIsolated(false)
     } else {
-      // First press — isolate the selected objects
-      // If multiple objects are selected, isolate all of them
       const targets = selectedGlobalIds.size > 1
         ? Array.from(selectedGlobalIds)
         : [ifcObject.globalId]
-      console.log('[IFCInspector] Isolate', targets)
       isolateObjects(targets)
       setIsIsolated(true)
     }
   }, [ifcObject, isolateObjects, isIsolated, selectedGlobalIds])
 
-  // Reset isolation state when selection changes
-  // so the button label stays consistent
+  // Close zone widget and reset isolation when selection changes
   const prevGlobalId = primaryGlobalId
   if (isIsolated && prevGlobalId !== primaryGlobalId) {
     setIsIsolated(false)
@@ -5999,10 +5998,104 @@ export default function IFCInspector() {
             <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
           </div>
         </div>
+        {/* Multi-selection indicator */}
+        {selectedGlobalIds.size > 1 && (
+          <div className="insp-multi-badge">
+            +{selectedGlobalIds.size - 1} selected
+          </div>
+        )}
       </div>
 
+      {/* ── Quick Actions ─────────────────────────────────────── */}
+      {/*
+        Moved ABOVE property data so it's immediately visible on selection.
+        Primary workflow: select → see actions → act.
+      */}
+      <div className="insp-actions">
+        <button
+          className="action-btn"
+          onClick={handleZoom}
+          disabled={!zoomToObject}
+          title={zoomToObject ? 'Zoom camera to this element' : 'Viewer not ready'}
+        >
+          🔍 Zoom
+        </button>
+
+        <button
+          className={`action-btn${isIsolated ? ' action-btn--active' : ''}`}
+          onClick={handleIsolate}
+          disabled={!isolateObjects}
+          title={
+            !isolateObjects
+              ? 'Viewer not ready'
+              : isIsolated
+                ? 'Restore full model visibility'
+                : selectedGlobalIds.size > 1
+                  ? `Isolate ${selectedGlobalIds.size} selected elements`
+                  : 'Isolate this element'
+          }
+        >
+          {isIsolated ? '👁 Show All' : '💡 Isolate'}
+        </button>
+
+        {/*
+          "Assign Zone" — the primary new action.
+          Opens the ZoneAssignWidget inline below the action bar.
+          The zone-assign button gains an --active state while the widget is open.
+        */}
+        <button
+          className={`action-btn action-btn--zone${zoneWidgetOpen ? ' action-btn--active' : ''}`}
+          onClick={() => setZoneWidgetOpen(v => !v)}
+          title={
+            zoneWidgetOpen
+              ? 'Close zone assignment'
+              : selectedGlobalIds.size > 1
+                ? `Assign ${selectedGlobalIds.size} selected elements to a zone`
+                : 'Assign this element to a zone'
+          }
+        >
+          📐 {zoneWidgetOpen ? 'Close' : 'Assign Zone'}
+          {assignedZones.length > 0 && !zoneWidgetOpen && (
+            <span className="action-btn__badge">{assignedZones.length}</span>
+          )}
+        </button>
+
+        <button
+          className="action-btn"
+          disabled={!linkedActivity}
+          onClick={() => console.log('Show activity', linkedActivity?.id)}
+        >
+          📋 Activity
+        </button>
+      </div>
+
+      {/* ── Zone Assignment Widget (inline, collapsible) ─────── */}
+      {/*
+        Renders directly below the action bar when zoneWidgetOpen = true.
+        Does not navigate away; no tab switch required.
+      */}
+      <ZoneAssignWidget
+        isOpen={zoneWidgetOpen}
+        onClose={() => setZoneWidgetOpen(false)}
+      />
+
+      {/* ── Assigned Zones summary ────────────────────────────── */}
+      {assignedZones.length > 0 && !zoneWidgetOpen && (
+        <div className="insp-zones-summary">
+          <span className="insp-zones-summary__label">Zones</span>
+          <div className="insp-zones-summary__chips">
+            {assignedZones.map(z => (
+              <span key={z.id} className="insp-zone-chip">
+                <span className="insp-zone-chip__dot" style={{ background: z.color }} />
+                {z.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Identity Data ─────────────────────────────────────── */}
-      <Section title="Identity Data" defaultOpen={true}>
+      <Section title="Identity Data" defaultOpen={false}>
         <PropRow
           label="Global ID"
           value={
@@ -6036,7 +6129,7 @@ export default function IFCInspector() {
       {psetNames.length > 0 && (
         <Section
           title="Property Sets"
-          defaultOpen={true}
+          defaultOpen={false}
           badge={psetNames.length}
         >
           <div className="insp-psets">
@@ -6058,59 +6151,6 @@ export default function IFCInspector() {
           <ActivityCard activity={linkedActivity} status={status} />
         </Section>
       )}
-
-      {/* ── Information Layers ────────────────────────────────── */}
-      {assignedLayers.length > 0 && (
-        <Section
-          title="Information Layers"
-          defaultOpen={true}
-          badge={assignedLayers.length}
-        >
-          <div className="insp-layers">
-            {assignedLayers.map(layer => (
-              <div key={layer.id} className="insp-layer-row">
-                <span className="insp-layer-dot" style={{ background: layer.color }} />
-                <span className="insp-layer-name">{layer.name}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* ── Quick Actions ─────────────────────────────────────── */}
-      <div className="insp-actions">
-        <button
-          className="action-btn"
-          onClick={handleZoom}
-          disabled={!zoomToObject}
-          title={zoomToObject ? 'Zoom camera to this element' : 'Viewer not ready'}
-        >
-          🔍 Zoom To
-        </button>
-        <button
-          className={`action-btn${isIsolated ? ' action-btn--active' : ''}`}
-          onClick={handleIsolate}
-          disabled={!isolateObjects}
-          title={
-            !isolateObjects
-              ? 'Viewer not ready'
-              : isIsolated
-                ? 'Restore full model visibility'
-                : selectedGlobalIds.size > 1
-                  ? `Isolate ${selectedGlobalIds.size} selected elements`
-                  : 'Hide all other elements'
-          }
-        >
-          {isIsolated ? '👁 Show All' : '💡 Isolate'}
-        </button>
-        <button
-          className="action-btn"
-          disabled={!linkedActivity}
-          onClick={() => console.log('Show activity', linkedActivity?.id)}
-        >
-          📋 Activity
-        </button>
-      </div>
 
     </div>
   )
@@ -6596,14 +6636,27 @@ const TreeRow = memo(function TreeRow({
 // ─── Virtual list ─────────────────────────────────────────────────────────────
 
 function VirtualList({
-  rowIds, nodes, expandedIds, selectedGlobalId, onToggle, onSelect,
+  rowIds, nodes, expandedIds, selectedGlobalId, scrollToNodeId, onToggle, onSelect,
 }: {
-  rowIds: string[]; nodes: Map<string, DisplayNode>; expandedIds: Set<string>
-  selectedGlobalId: string | null; onToggle: (id: string) => void; onSelect: (globalId: string) => void
+  rowIds: string[]
+  nodes: Map<string, DisplayNode>
+  expandedIds: Set<string>
+  selectedGlobalId: string | null
+  /**
+   * When this value changes, the list scrolls to the row whose node.id
+   * equals this value, keeping the selected item visible.
+   * Only fires when selection originates outside the tree (Model → Tree).
+   */
+  scrollToNodeId: string | null
+  onToggle: (id: string) => void
+  onSelect: (globalId: string) => void
 }) {
   const scrollRef             = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [height,    setHeight]    = useState(400)
+
+  // Track what we last scrolled to so we don't re-scroll on every render
+  const lastScrolledNodeRef = useRef<string | null>(null)
 
   useEffect(() => {
     const el = scrollRef.current
@@ -6612,6 +6665,48 @@ function VirtualList({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  // ── Scroll-to-selected: Model → Tree direction ───────────────────────────
+  //
+  // When scrollToNodeId changes (set by the parent after expanding ancestors),
+  // find the row index for that node in the current rowIds array and
+  // programmatically scroll the container so the row is centered in view.
+  //
+  // We use a small setTimeout(0) to let React flush the expanded ancestors
+  // first (which may have added new rows to rowIds before this effect runs),
+  // then scroll. This is necessary because buildVisibleRows is recalculated
+  // synchronously on the same render cycle that sets expandedIds, so by the
+  // time the effect fires, the new rowIds are already correct in the DOM.
+  //
+  useEffect(() => {
+    if (!scrollToNodeId) return
+    if (scrollToNodeId === lastScrolledNodeRef.current) return
+
+    // Small defer: let the DOM settle after ancestor expansion
+    const frameId = requestAnimationFrame(() => {
+      const idx = rowIds.indexOf(scrollToNodeId)
+      if (idx === -1) return   // node not visible (shouldn't happen after expansion)
+
+      const el = scrollRef.current
+      if (!el) return
+
+      const rowTop    = idx * ROW_HEIGHT
+      const rowBottom = rowTop + ROW_HEIGHT
+      const viewTop   = el.scrollTop
+      const viewBottom = viewTop + el.clientHeight
+
+      // Only scroll if the row is outside the visible viewport
+      if (rowTop < viewTop || rowBottom > viewBottom) {
+        // Center the selected row in the viewport
+        const targetScrollTop = rowTop - el.clientHeight / 2 + ROW_HEIGHT / 2
+        el.scrollTop = Math.max(0, targetScrollTop)
+      }
+
+      lastScrolledNodeRef.current = scrollToNodeId
+    })
+
+    return () => cancelAnimationFrame(frameId)
+  }, [scrollToNodeId, rowIds])
 
   const handleScroll = useCallback(() => { setScrollTop(scrollRef.current?.scrollTop ?? 0) }, [])
 
@@ -6654,8 +6749,32 @@ export default function IFCObjectTree() {
   const primaryGlobalId = useSelectionStore(s => s.primaryGlobalId)
   const selectObject    = useSelectionStore(s => s.selectObject)
 
+  /**
+   * zoomToObject — the same callback the Inspector's Zoom button uses.
+   * Registered by IFCViewer into the store once the engine is ready.
+   * May be null before the engine initialises — optional-chain guards below.
+   */
+  const zoomToObject    = useViewerStore(s => s.zoomToObject)
+
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
+
+  /**
+   * scrollToNodeId — the display-node ID the VirtualList should scroll to.
+   *
+   * Set only when selection originates from the Model (or Gantt), not from
+   * a click inside the tree itself. This prevents the list from jumping when
+   * the user is navigating the tree by clicking rows.
+   */
+  const [scrollToNodeId, setScrollToNodeId] = useState<string | null>(null)
+
+  /**
+   * Flag that tracks whether the most recent selection change was initiated
+   * by a click inside the tree itself. When true we skip the scroll-to logic.
+   *
+   * We use a ref (not state) so it does not trigger additional renders.
+   */
+  const treeInitiatedSelectRef = useRef(false)
 
   const objectMap = useMemo<Map<string, IFCObject>>(() => {
     const m = new Map<string, IFCObject>()
@@ -6676,10 +6795,10 @@ export default function IFCObjectTree() {
     return { nodes: new Map<string, DisplayNode>(), rootIds: [] as string[] }
   }, [spatialTree, ifcObjects, objectMap, modelName])
 
+  // ── Auto-expand on model load ────────────────────────────────────────────
   useEffect(() => {
     if (modelLoadState === 'idle') { setExpandedIds(new Set()); setSearchQuery(''); return }
     if (modelLoadState === 'loaded' && rootIds.length > 0) {
-      // Auto-expand root + first two levels
       const initial = new Set<string>()
       function expand(id: string, depth: number): void {
         if (depth > 2) return
@@ -6691,27 +6810,68 @@ export default function IFCObjectTree() {
     }
   }, [modelLoadState, rootIds, nodes])
 
+  // ── Bidirectional sync: selection changes → expand ancestors + scroll ────
+  //
+  // This effect fires whenever primaryGlobalId changes in the store.
+  // It handles BOTH directions:
+  //
+  //   Tree → Model: the user clicked a tree row.
+  //     treeInitiatedSelectRef.current = true (set in handleSelect below).
+  //     We still expand ancestors (so the tree state is consistent), but
+  //     we do NOT update scrollToNodeId (the user already clicked the row,
+  //     no scroll is needed — their viewport is already there).
+  //
+  //   Model → Tree (or Gantt → Tree): selection changed externally.
+  //     treeInitiatedSelectRef.current = false.
+  //     We expand ancestors AND set scrollToNodeId so VirtualList scrolls.
+  //
   const prevSelectedRef = useRef<string | null>(null)
+
   useEffect(() => {
-    if (!primaryGlobalId || primaryGlobalId === prevSelectedRef.current) return
+    if (!primaryGlobalId || primaryGlobalId === prevSelectedRef.current) {
+      // Reset flag when selection clears
+      if (!primaryGlobalId) treeInitiatedSelectRef.current = false
+      return
+    }
     prevSelectedRef.current = primaryGlobalId
 
-    // The leaf node for a selected element may have id = "leaf:storeyId:globalId"
-    // Find it by looking for a node whose globalId matches
+    // Find the display node whose globalId matches the selected element.
+    // Prefer leaf nodes (id starts with "leaf:") over spatial nodes so
+    // we land at the deepest visible position in the tree.
     let targetId: string | undefined
+    let leafId:   string | undefined
+
     for (const [id, node] of nodes) {
-      if (node.globalId === primaryGlobalId) { targetId = id; break }
+      if (node.globalId === primaryGlobalId) {
+        targetId = id
+        if (id.startsWith('leaf:')) {
+          leafId = id
+          break   // leaf found — stop searching
+        }
+      }
     }
-    if (!targetId) return
 
-    const ancestors = getAncestorIds(nodes, targetId)
-    if (ancestors.size === 0) return
+    // Prefer a leaf node when one exists
+    const resolvedId = leafId ?? targetId
+    if (!resolvedId) return
 
-    setExpandedIds(prev => {
-      const next = new Set(prev)
-      ancestors.forEach(id => next.add(id))
-      return next
-    })
+    // Always expand ancestors to make the node visible in the tree
+    const ancestors = getAncestorIds(nodes, resolvedId)
+    if (ancestors.size > 0) {
+      setExpandedIds(prev => {
+        const next = new Set(prev)
+        ancestors.forEach(id => next.add(id))
+        return next
+      })
+    }
+
+    // Only scroll when selection did NOT originate in the tree
+    if (!treeInitiatedSelectRef.current) {
+      setScrollToNodeId(resolvedId)
+    }
+
+    // Reset the flag for the next selection event
+    treeInitiatedSelectRef.current = false
   }, [primaryGlobalId, nodes])
 
   const visibleRowIds = useMemo(
@@ -6722,7 +6882,30 @@ export default function IFCObjectTree() {
   const handleToggle      = useCallback((id: string) => {
     setExpandedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
   }, [])
-  const handleSelect      = useCallback((globalId: string) => selectObject(globalId, false), [selectObject])
+
+  /**
+   * handleSelect — called when the user clicks a row in the tree.
+   *
+   * Sets treeInitiatedSelectRef = true BEFORE calling selectObject so that
+   * the subsequent primaryGlobalId change (in the useEffect above) knows
+   * the selection came from the tree and should NOT trigger a scroll.
+   *
+   * Auto-zoom: after selecting, the camera automatically frames the object
+   * using the same zoomToObject callback the Inspector's Zoom button uses.
+   * Only fires when the selected object actually changes (prevSelectedRef
+   * guard) to avoid needless camera movement on repeated clicks of the same
+   * node. Multi-select is never triggered from the tree (always false here).
+   */
+  const handleSelect = useCallback((globalId: string) => {
+    treeInitiatedSelectRef.current = true
+    selectObject(globalId, false)
+
+    // Auto-zoom only when selecting a different object
+    if (globalId !== prevSelectedRef.current) {
+      zoomToObject?.(globalId)
+    }
+  }, [selectObject, zoomToObject])
+
   const handleExpandAll   = useCallback(() => setExpandedIds(new Set(nodes.keys())), [nodes])
   const handleCollapseAll = useCallback(() => setExpandedIds(new Set()), [])
 
@@ -6768,6 +6951,7 @@ export default function IFCObjectTree() {
           nodes={nodes}
           expandedIds={expandedIds}
           selectedGlobalId={primaryGlobalId}
+          scrollToNodeId={scrollToNodeId}
           onToggle={handleToggle}
           onSelect={handleSelect}
         />
@@ -6791,6 +6975,7 @@ import { useUIStore }          from '../store/ui.store'
 import { useLayerStore }       from '../store/layer.store'
 import { FilterEngine }        from '../core/filter/FilterEngine'
 import IFCUploadZone           from '../features/viewer/IFCUploadZone'
+import SelectionLabel          from './SelectionLabel'
 import { useAllAssignments, useGlobalIdLayerMap } from '../hooks/useAssignments'
 
 export default function IFCViewer() {
@@ -6807,6 +6992,10 @@ export default function IFCViewer() {
   const resetModel          = useViewerStore(s => s.resetModel)
   const setEngineActions    = useViewerStore(s => s.setEngineActions)
   const clearEngineActions  = useViewerStore(s => s.clearEngineActions)
+
+  // Read current action slots so we can detect when they are null
+  const zoomToObject    = useViewerStore(s => s.zoomToObject)
+  const isolateObjects  = useViewerStore(s => s.isolateObjects)
 
   const selectedGlobalIds  = useSelectionStore(s => s.selectedGlobalIds)
   const primaryGlobalId    = useSelectionStore(s => s.primaryGlobalId)
@@ -6836,11 +7025,13 @@ export default function IFCViewer() {
       container,
 
       onObjectPicked: (globalId, isMulti) => {
+        console.log('[IFCViewer] onObjectPicked — globalId:', globalId, 'isMulti:', isMulti)
         if (globalId) selectObject(globalId, isMulti)
         else          clearSelection()
       },
 
       onSceneReady: () => {
+        console.log('[IFCViewer] onSceneReady — registering engine actions')
         setSceneReady(true)
 
         // ── Register engine action callbacks into the store ──
@@ -6848,19 +7039,23 @@ export default function IFCViewer() {
         // before any component can call the callbacks.
         setEngineActions(
           (globalId: string) => {
+            console.log('[IFCViewer] zoomToObject called — globalId:', globalId)
             engineRef.current?.zoomToObject(globalId).catch(console.warn)
           },
           (globalIds: string[]) => {
+            console.log('[IFCViewer] isolateObjects called — count:', globalIds.length)
             engineRef.current?.isolateObjects(globalIds).catch(console.warn)
           }
         )
       },
 
       onModelLoaded: (_count) => {
+        console.log('[IFCViewer] onModelLoaded — objectCount:', _count)
         setModelLoadState('loaded')
       },
 
       onError: (message) => {
+        console.warn('[IFCViewer] onError —', message)
         addError(message, '3D Viewer')
         setModelError(message)
         setModelLoadState('error')
@@ -6877,6 +7072,7 @@ export default function IFCViewer() {
     engineRef.current = engine
 
     return () => {
+      console.log('[IFCViewer] disposing ViewerEngine')
       engine.dispose()
       engineRef.current = null
       setSceneReady(false)
@@ -6886,14 +7082,79 @@ export default function IFCViewer() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ── Guard: re-register engine actions if they were wiped ─
+  //
+  // This is a belt-and-suspenders safety net. The primary fix is in
+  // viewer.store.ts (resetModel no longer nulls the callbacks). However,
+  // if any code path ever nulls zoomToObject / isolateObjects while the
+  // engine is still alive, this effect immediately restores them.
+  //
+  // It fires whenever sceneReady becomes true OR whenever the callbacks
+  // are discovered to be null while the engine is live.
+  //
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine || !sceneReady) return
+    if (zoomToObject !== null && isolateObjects !== null) return
+
+    console.warn(
+      '[IFCViewer] ⚠ Engine action callbacks are null while engine is alive — restoring.',
+      'zoomToObject:', zoomToObject,
+      'isolateObjects:', isolateObjects,
+    )
+
+    setEngineActions(
+      (globalId: string) => {
+        console.log('[IFCViewer] zoomToObject (restored) — globalId:', globalId)
+        engineRef.current?.zoomToObject(globalId).catch(console.warn)
+      },
+      (globalIds: string[]) => {
+        console.log('[IFCViewer] isolateObjects (restored) — count:', globalIds.length)
+        engineRef.current?.isolateObjects(globalIds).catch(console.warn)
+      }
+    )
+  }, [sceneReady, zoomToObject, isolateObjects, setEngineActions])
+
   // ── Unload 3D scene when state returns to idle ───────────
   useEffect(() => {
     if (modelLoadState !== 'idle') return
     const engine = engineRef.current
     if (!engine) return
+    console.log('[IFCViewer] modelLoadState → idle, calling unloadAll')
     engine.unloadAll().catch(err => {
       console.warn('[IFCViewer] unloadAll on idle transition:', err)
     })
+  }, [modelLoadState])
+
+  // ── Debug: log selection changes ─────────────────────────
+  useEffect(() => {
+    console.log(
+      '[IFCViewer] Selection changed —',
+      'primaryGlobalId:', primaryGlobalId,
+      'selectedCount:', selectedGlobalIds.size,
+    )
+    const store = useViewerStore.getState()
+    console.log(
+      '[IFCViewer] Engine action state —',
+      'zoomToObject:', store.zoomToObject !== null ? '✅ set' : '❌ null',
+      'isolateObjects:', store.isolateObjects !== null ? '✅ set' : '❌ null',
+    )
+  }, [primaryGlobalId, selectedGlobalIds])
+
+  // ── Debug: log modelLoadState transitions ─────────────────
+  useEffect(() => {
+    console.log('[IFCViewer] modelLoadState →', modelLoadState)
+    if (modelLoadState === 'loaded') {
+      const store = useViewerStore.getState()
+      const loadedModels = engineRef.current?.getLoadedModels() ?? []
+      console.log(
+        '[IFCViewer] Model loaded —',
+        'ifcObjects in store:', useViewerStore.getState().ifcObjects.length,
+        'loadedModels in engine:', loadedModels.length,
+        'zoomToObject:', store.zoomToObject !== null ? '✅ set' : '❌ null',
+        'isolateObjects:', store.isolateObjects !== null ? '✅ set' : '❌ null',
+      )
+    }
   }, [modelLoadState])
 
   // ── Effect 1: Simulation color overlay ──────────────────
@@ -7006,6 +7267,16 @@ export default function IFCViewer() {
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#070B0F' }}>
 
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+      {/*
+        ── Selection Label ──────────────────────────────────────────────────────
+        Always mounted. Manages its own visibility via RAF + direct DOM mutation.
+        Positioned inside the viewer container so it clips to the 3D viewport.
+        Rendered only when a model is loaded (no label over loading/error states).
+      */}
+      {modelLoadState === 'loaded' && (
+        <SelectionLabel engineRef={engineRef} />
+      )}
 
       {showInitializing && (
         <div style={{
@@ -7640,13 +7911,13 @@ import GanttPanel                from './GanttPanel'
 import TimelineSlider            from './TimelineSlider'
 import IFCInspector              from './IFCInspector'
 import IFCObjectTree             from './IFCObjectTree'
-import LayerPanel                from './layers/LayerPanel'
-import LayerAssignmentPanel      from './layers/LayerAssignmentPanel'
-import LayerFilterBar            from './layers/LayerFilterBar'
+import ZonePanel                 from './zones/ZonePanel'
+import ZoneFilterBar             from './zones/ZoneFilterBar'
 import { useViewerStore }        from '../store/viewer.store'
+import { useLayerStore }         from '../store/layer.store'
 import { IFCUploadService }      from '../services/ifc/IFCUploadService'
 
-type RightTab = 'inspector' | 'tree' | 'layers'
+type RightTab = 'inspector' | 'tree' | 'zones'
 
 export default function Layout() {
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
@@ -7654,6 +7925,9 @@ export default function Layout() {
   const modelFileName  = useViewerStore(s => s.modelFileName)
   const modelFileSize  = useViewerStore(s => s.modelFileSize)
   const resetModel     = useViewerStore(s => s.resetModel)
+
+  // Zone filter count for tab badge
+  const activeFilterIds = useLayerStore(s => s.activeFilterIds)
 
   const [rightTab, setRightTab] = useState<RightTab>('inspector')
 
@@ -7685,6 +7959,12 @@ export default function Layout() {
           <span className="bim-badge">
             {ifcObjects.length} Elements
           </span>
+          {/* Zone filter indicator in header */}
+          {activeFilterIds.length > 0 && (
+            <span className="bim-badge bim-badge--zone-filter">
+              📐 {activeFilterIds.length} zone{activeFilterIds.length !== 1 ? 's' : ''} filtered
+            </span>
+          )}
         </div>
 
         <div className="bim-header__right">
@@ -7713,8 +7993,9 @@ export default function Layout() {
           <ErrorBoundary context="3D Viewer">
             <IFCViewer />
           </ErrorBoundary>
-          <ErrorBoundary context="Layer Filter Bar">
-            <LayerFilterBar />
+          {/* Zone filter bar replaces layer filter bar — same store, updated copy */}
+          <ErrorBoundary context="Zone Filter Bar">
+            <ZoneFilterBar />
           </ErrorBoundary>
         </div>
       </div>
@@ -7743,7 +8024,7 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Right: Inspector | Object Tree | Layers */}
+        {/* Right: Inspector | Object Tree | Zones */}
         <div className="panel" style={{ borderRight: 'none' }}>
           <div className="panel-header">
             <div className="panel-tabs">
@@ -7759,11 +8040,18 @@ export default function Layout() {
               >
                 Object Tree
               </button>
+              {/*
+                Renamed from "Layers" → "Zones" throughout.
+                Active filter count badge shows when filters are on.
+              */}
               <button
-                className={`panel-tab${rightTab === 'layers' ? ' panel-tab--active' : ''}`}
-                onClick={() => setRightTab('layers')}
+                className={`panel-tab${rightTab === 'zones' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('zones')}
               >
-                Layers
+                Zones
+                {activeFilterIds.length > 0 && (
+                  <span className="panel-tab__badge">{activeFilterIds.length}</span>
+                )}
               </button>
             </div>
             <div className="panel-header__actions">
@@ -7786,33 +8074,369 @@ export default function Layout() {
               </ErrorBoundary>
 
             ) : (
-              /* ── Layers tab ───────────────────────────────────────────
-                 .layers-tab-root is a flex column that fills panel-body.
-                 Its two children (.layer-panel and .assign-section) share
-                 the height via flex:55 / flex:45, both with min-height:0
-                 so they can shrink and allow their own scroll zones to
-                 work correctly at any viewport height.                  */
-              <ErrorBoundary context="Layers Panel">
-                <div className="layers-tab-root">
-
-                  {/* Top section: layer management */}
-                  <LayerPanel />
-
-                  {/* Bottom section: assign selected objects to layers */}
-                  <div className="assign-section">
-                    <div className="assign-section__label">
-                      Assign to Selection
-                    </div>
-                    <LayerAssignmentPanel />
-                  </div>
-
-                </div>
+              /*
+                Zones tab — replaces the old two-section "Layers + Assign" split.
+                ZonePanel is a single unified surface for zone management.
+                Assignment is handled inline in the Inspector via ZoneAssignWidget,
+                so the Zones tab no longer needs a separate assignment section.
+              */
+              <ErrorBoundary context="Zones Panel">
+                <ZonePanel />
               </ErrorBoundary>
             )}
 
           </div>
         </div>
 
+      </div>
+    </div>
+  )
+}
+
+
+====================================================================================================
+FILE: src\components\SelectionLabel.tsx
+====================================================================================================
+
+import { useEffect, useRef, useCallback } from 'react'
+import * as THREE from 'three'
+import { useSelectionStore } from '../store/selection.store'
+import { useViewerStore }    from '../store/viewer.store'
+import type { ViewerEngine } from '../viewer/ViewerEngine'
+import type { IFCObject }    from '../types'
+
+// ── Props ─────────────────────────────────────────────────────────────────────
+
+interface SelectionLabelProps {
+  /** Live ref to the ViewerEngine instance. May be null before init or after dispose. */
+  engineRef: React.RefObject<ViewerEngine | null>
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export default function SelectionLabel({ engineRef }: SelectionLabelProps) {
+  // ── Store subscriptions ──────────────────────────────────
+  const primaryGlobalId     = useSelectionStore(s => s.primaryGlobalId)
+  const getObjectByGlobalId = useViewerStore(s => s.getObjectByGlobalId)
+
+  // ── Refs ─────────────────────────────────────────────────
+
+  /** The outer wrapper div — controls visibility via opacity/pointerEvents */
+  const labelRef = useRef<HTMLDivElement>(null)
+
+  /** Text content refs — mutated directly, not via React state */
+  const nameRef    = useRef<HTMLSpanElement>(null)
+  const typeRef    = useRef<HTMLSpanElement>(null)
+  const guidRef    = useRef<HTMLSpanElement>(null)
+
+  /**
+   * World-space anchor point (top-center of selected object bounding box).
+   * Updated asynchronously when selection changes.
+   * Read synchronously in the RAF loop.
+   */
+  const anchorRef = useRef<THREE.Vector3 | null>(null)
+
+  /** Reusable projected vector — allocated once, mutated each frame */
+  const projectedRef = useRef(new THREE.Vector3())
+
+  /** RAF handle for cleanup */
+  const rafRef = useRef<number>(0)
+
+  /** Whether the label is currently shown (avoids redundant DOM writes) */
+  const visibleRef = useRef(false)
+
+  // ── Show / hide helpers (imperative) ─────────────────────
+
+  const showLabel = useCallback(() => {
+    const el = labelRef.current
+    if (!el || visibleRef.current) return
+    el.style.opacity       = '1'
+    el.style.pointerEvents = 'none'
+    visibleRef.current     = true
+  }, [])
+
+  const hideLabel = useCallback(() => {
+    const el = labelRef.current
+    if (!el || !visibleRef.current) return
+    el.style.opacity       = '0'
+    el.style.pointerEvents = 'none'
+    visibleRef.current     = false
+  }, [])
+
+  // ── RAF loop: project anchor → screen position every frame ───────────────
+
+  const startRAF = useCallback(() => {
+    const loop = () => {
+      rafRef.current = requestAnimationFrame(loop)
+
+      const anchor = anchorRef.current
+      const label  = labelRef.current
+
+      if (!anchor || !label) {
+        hideLabel()
+        return
+      }
+
+      const engine = engineRef.current
+      if (!engine) {
+        hideLabel()
+        return
+      }
+
+      const camera    = engine.getCamera()
+      const container = engine.getContainerElement()
+      if (!camera || !container) {
+        hideLabel()
+        return
+      }
+
+      // Project world → NDC (−1 to +1)
+      projectedRef.current.copy(anchor).project(camera)
+
+      const ndcX = projectedRef.current.x
+      const ndcY = projectedRef.current.y
+      const ndcZ = projectedRef.current.z
+
+      // If the anchor is behind the camera (ndcZ > 1), hide the label
+      if (ndcZ > 1) {
+        hideLabel()
+        return
+      }
+
+      const w = container.clientWidth
+      const h = container.clientHeight
+
+      // NDC → pixel
+      const px =  (ndcX + 1) / 2 * w
+      const py = (-ndcY + 1) / 2 * h
+
+      // Guard against positions wildly outside the viewport (far-plane clip)
+      if (px < -200 || px > w + 200 || py < -200 || py > h + 200) {
+        hideLabel()
+        return
+      }
+
+      // Apply position. The label is centered horizontally and sits above
+      // the anchor via CSS transform: translate(-50%, -100%) on the inner div.
+      label.style.left = `${px}px`
+      label.style.top  = `${py}px`
+
+      showLabel()
+    }
+
+    rafRef.current = requestAnimationFrame(loop)
+  }, [engineRef, showLabel, hideLabel])
+
+  const stopRAF = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = 0
+    }
+  }, [])
+
+  // ── Start RAF once on mount, stop on unmount ──────────────
+  useEffect(() => {
+    startRAF()
+    return () => {
+      stopRAF()
+    }
+  }, [startRAF, stopRAF])
+
+  // ── React to selection changes ────────────────────────────
+
+  useEffect(() => {
+    // Clear previous anchor immediately so the label hides during the async fetch
+    anchorRef.current = null
+
+    if (!primaryGlobalId) {
+      // Selection cleared — label stays hidden (RAF loop will hide it next frame)
+      if (nameRef.current) nameRef.current.textContent = ''
+      if (typeRef.current) typeRef.current.textContent = ''
+      if (guidRef.current) guidRef.current.textContent = ''
+      return
+    }
+
+    // Update label text content immediately from the store (synchronous)
+    const obj: IFCObject | undefined = getObjectByGlobalId(primaryGlobalId)
+    if (obj) {
+      const displayName = obj.name?.trim() || obj.type
+      if (nameRef.current) nameRef.current.textContent = displayName
+      if (typeRef.current) typeRef.current.textContent = obj.type
+      if (guidRef.current) guidRef.current.textContent = obj.globalId
+    } else {
+      // Object not in store yet (race condition during load) — show GlobalId only
+      if (nameRef.current) nameRef.current.textContent = primaryGlobalId
+      if (typeRef.current) typeRef.current.textContent = ''
+      if (guidRef.current) guidRef.current.textContent = primaryGlobalId
+    }
+
+    // Fetch the 3D anchor point asynchronously
+    // The RAF loop will start showing the label as soon as anchorRef is set
+    const engine = engineRef.current
+    if (!engine) return
+
+    let cancelled = false
+
+    engine.getObjectWorldTop(primaryGlobalId).then(worldTop => {
+      if (cancelled) return
+      anchorRef.current = worldTop
+    }).catch(() => {
+      if (!cancelled) anchorRef.current = null
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [primaryGlobalId, getObjectByGlobalId, engineRef])
+
+  // ── Render ────────────────────────────────────────────────
+  //
+  // The outer div is absolutely positioned and pointer-events:none so it
+  // never intercepts mouse events. It starts hidden (opacity:0).
+  //
+  // The inner .sel-label div is the visible callout, centered horizontally
+  // above the anchor point via transform: translate(-50%, calc(-100% - 10px)).
+  // The 10px gap pushes it above the arrow tip.
+  //
+  // All position updates happen via direct DOM mutation on the outer div's
+  // left/top style — NOT via React state. The inner content (text) is
+  // mutated directly via the nameRef/typeRef/guidRef refs.
+
+  return (
+    <div
+      ref={labelRef}
+      style={{
+        position:      'absolute',
+        top:           0,
+        left:          0,
+        pointerEvents: 'none',
+        opacity:       0,
+        // GPU compositing hint — label moves constantly
+        willChange:    'transform, opacity',
+        // Smooth fade when appearing/disappearing
+        transition:    'opacity 0.15s ease',
+        // Prevent label from being clipped by the container
+        overflow:      'visible',
+        // Ensure it floats above all other viewer overlays (stats, legend)
+        zIndex:        50,
+      }}
+    >
+      {/*
+        Inner callout wrapper.
+        transform: translate(-50%, calc(-100% - 12px))
+          -50%          → horizontal centering on the anchor point
+          calc(-100%-12px) → sit fully above anchor + 12px gap for the arrow
+      */}
+      <div
+        style={{
+          transform:     'translate(-50%, calc(-100% - 12px))',
+          display:       'flex',
+          flexDirection: 'column',
+          alignItems:    'center',
+          gap:           0,
+        }}
+      >
+        {/* Callout bubble */}
+        <div
+          style={{
+            background:    'rgba(13, 17, 23, 0.92)',
+            border:        '1px solid rgba(47, 107, 255, 0.5)',
+            borderRadius:  8,
+            padding:       '8px 12px',
+            minWidth:      140,
+            maxWidth:      260,
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            boxShadow: [
+              '0 4px 24px rgba(0, 0, 0, 0.6)',
+              '0 0 0 1px rgba(47, 107, 255, 0.15)',
+              'inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+            ].join(', '),
+            display:       'flex',
+            flexDirection: 'column',
+            gap:           3,
+          }}
+        >
+          {/* Object name */}
+          <span
+            ref={nameRef}
+            style={{
+              fontSize:     13,
+              fontWeight:   600,
+              color:        '#E6EDF3',
+              lineHeight:   1.3,
+              wordBreak:    'break-word',
+              fontFamily:   "'Segoe UI', system-ui, -apple-system, sans-serif",
+            }}
+          />
+
+          {/* IFC type */}
+          <span
+            ref={typeRef}
+            style={{
+              fontSize:     10,
+              fontWeight:   600,
+              color:        '#2F6BFF',
+              letterSpacing: '0.04em',
+              fontFamily:   "'Segoe UI', system-ui, -apple-system, sans-serif",
+            }}
+          />
+
+          {/* Divider */}
+          <div
+            style={{
+              height:     1,
+              background: 'rgba(48, 54, 61, 0.8)',
+              margin:     '2px 0',
+            }}
+          />
+
+          {/* GlobalId */}
+          <span
+            ref={guidRef}
+            style={{
+              fontSize:    9,
+              color:       '#8B949E',
+              fontFamily:  'ui-monospace, SFMono-Regular, monospace',
+              letterSpacing: '0.02em',
+              overflow:    'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace:  'nowrap',
+            }}
+          />
+        </div>
+
+        {/*
+          Callout arrow — a CSS triangle pointing down.
+          Positioned directly below the bubble.
+        */}
+        <div
+          style={{
+            width:       0,
+            height:      0,
+            borderLeft:  '7px solid transparent',
+            borderRight: '7px solid transparent',
+            borderTop:   '8px solid rgba(13, 17, 23, 0.92)',
+            // Outer border color arrow (slightly larger, behind the fill arrow)
+            filter:      'drop-shadow(0 2px 3px rgba(0,0,0,0.4))',
+            position:    'relative',
+          }}
+        >
+          {/* Inner arrow — renders the border color */}
+          <div
+            style={{
+              position:    'absolute',
+              top:         -9,
+              left:        -6,
+              width:       0,
+              height:      0,
+              borderLeft:  '6px solid transparent',
+              borderRight: '6px solid transparent',
+              borderTop:   '7px solid rgba(47, 107, 255, 0.5)',
+              zIndex:      -1,
+            }}
+          />
+        </div>
       </div>
     </div>
   )
@@ -7964,6 +8588,891 @@ export default function TimelineSlider() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+
+====================================================================================================
+FILE: src\components\zones\ZoneAssignWidget.tsx
+====================================================================================================
+
+import { useState, useCallback } from 'react'
+import { useSelectionStore }      from '../../store/selection.store'
+import { useViewerStore }         from '../../store/viewer.store'
+import { useLayerStore }          from '../../store/layer.store'
+import {
+  useAssignmentsByGlobalId,
+  useAssignLayer,
+  useRemoveObjectFromLayer,
+}                                 from '../../hooks/useAssignments'
+import {
+  useCreateLayer,
+}                                 from '../../hooks/useLayers'
+import { LAYER_CATEGORY_META }    from '../../types'
+import type { LayerCategory }     from '../../types'
+
+const PALETTE = [
+  '#3498DB', '#2ECC71', '#E74C3C', '#F39C12', '#9B59B6',
+  '#1ABC9C', '#E67E22', '#E91E63', '#00BCD4', '#8BC34A',
+]
+function randomColor() { return PALETTE[Math.floor(Math.random() * PALETTE.length)] }
+
+// ── Quick create row ──────────────────────────────────────────────────────────
+
+interface QuickCreateProps {
+  onCreatedAndAssigned: (layerId: string) => void
+  isAssigning: boolean
+}
+
+function QuickCreateRow({ onCreatedAndAssigned, isAssigning }: QuickCreateProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [name,     setName]     = useState('')
+  const [category, setCategory] = useState<LayerCategory>('zones')
+  const [color,    setColor]    = useState(randomColor)
+
+  const createMutation = useCreateLayer()
+
+  const handleCreate = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    try {
+      const newLayer = await createMutation.mutateAsync({
+        payload: { name: trimmed, category, color, description: null },
+      })
+      setName('')
+      setColor(randomColor())
+      setExpanded(false)
+      onCreatedAndAssigned(newLayer.id)
+    } catch {
+      // mutation error shown via createMutation.isError below
+    }
+  }
+
+  if (!expanded) {
+    return (
+      <button
+        className="zone-assign__create-toggle"
+        onClick={() => setExpanded(true)}
+      >
+        ＋ Create new zone
+      </button>
+    )
+  }
+
+  return (
+    <div className="zone-assign__create-form">
+      <input
+        className="zone-assign__create-input"
+        type="text"
+        placeholder="Zone name…"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter')  handleCreate()
+          if (e.key === 'Escape') setExpanded(false)
+        }}
+        autoFocus
+        maxLength={80}
+      />
+      <input
+        type="color"
+        className="zone-assign__create-color"
+        value={color}
+        onChange={e => setColor(e.target.value)}
+        title="Zone color"
+      />
+      <select
+        className="zone-assign__create-cat"
+        value={category}
+        onChange={e => setCategory(e.target.value as LayerCategory)}
+      >
+        {LAYER_CATEGORY_META.map(m => (
+          <option key={m.value} value={m.value}>{m.icon} {m.label}</option>
+        ))}
+      </select>
+      <div className="zone-assign__create-actions">
+        <button
+          className="zone-assign__create-btn"
+          onClick={handleCreate}
+          disabled={createMutation.isPending || isAssigning || !name.trim()}
+        >
+          {createMutation.isPending ? '…' : 'Create & Assign'}
+        </button>
+        <button
+          className="zone-assign__cancel-btn"
+          onClick={() => setExpanded(false)}
+        >
+          Cancel
+        </button>
+      </div>
+      {createMutation.isError && (
+        <div className="zone-assign__error">
+          {(createMutation.error as Error).message}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── ZoneAssignWidget ──────────────────────────────────────────────────────────
+
+interface ZoneAssignWidgetProps {
+  isOpen:  boolean
+  onClose: () => void
+}
+
+export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetProps) {
+  const primaryGlobalId   = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds = useSelectionStore(s => s.selectedGlobalIds)
+  const getObjectByGlobalId = useViewerStore(s => s.getObjectByGlobalId)
+  const zones             = useLayerStore(s => s.layers)
+
+  const assignMutation = useAssignLayer()
+  const removeMutation = useRemoveObjectFromLayer()
+
+  const {
+    data:      assignments = [],
+    isLoading: loadingAssignments,
+  } = useAssignmentsByGlobalId(primaryGlobalId ?? '')
+
+  const assignedZoneIds = new Set(assignments.map(a => a.layerId))
+  const selectionCount  = selectedGlobalIds.size
+
+  const handleAssign = useCallback((zoneId: string) => {
+    const globalIds = Array.from(selectedGlobalIds)
+    assignMutation.mutate({ layerId: zoneId, globalIds })
+  }, [selectedGlobalIds, assignMutation])
+
+  const handleRemove = useCallback((zoneId: string) => {
+    if (!primaryGlobalId) return
+    removeMutation.mutate({ layerId: zoneId, globalId: primaryGlobalId })
+  }, [primaryGlobalId, removeMutation])
+
+  // Called when quick-create succeeds — immediately assign the new zone
+  const handleCreatedAndAssigned = useCallback((zoneId: string) => {
+    const globalIds = Array.from(selectedGlobalIds)
+    assignMutation.mutate({ layerId: zoneId, globalIds })
+  }, [selectedGlobalIds, assignMutation])
+
+  if (!isOpen) return null
+
+  const primaryObject = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
+
+  return (
+    <div className="zone-assign">
+
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <div className="zone-assign__header">
+        <div className="zone-assign__header-info">
+          <span className="zone-assign__header-title">Assign to Zone</span>
+          {primaryGlobalId && (
+            <span className="zone-assign__header-sub">
+              {primaryObject?.name ?? primaryGlobalId}
+              {selectionCount > 1 && (
+                <span className="zone-assign__multi"> +{selectionCount - 1} more</span>
+              )}
+            </span>
+          )}
+        </div>
+        <button
+          className="zone-assign__close"
+          onClick={onClose}
+          aria-label="Close zone assignment"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* ── Quick create ────────────────────────────────────────── */}
+      <div className="zone-assign__create-wrap">
+        <QuickCreateRow
+          onCreatedAndAssigned={handleCreatedAndAssigned}
+          isAssigning={assignMutation.isPending}
+        />
+      </div>
+
+      {/* ── Zone list ───────────────────────────────────────────── */}
+      <div className="zone-assign__list">
+
+        {loadingAssignments && (
+          <div className="zone-assign__loading">
+            <div className="upload-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+            <span>Loading…</span>
+          </div>
+        )}
+
+        {!loadingAssignments && zones.length === 0 && (
+          <div className="zone-assign__empty">
+            No zones yet. Create one above.
+          </div>
+        )}
+
+        {!loadingAssignments && zones.map(zone => {
+          const isAssigned = assignedZoneIds.has(zone.id)
+          return (
+            <div
+              key={zone.id}
+              className={`zone-assign__row${isAssigned ? ' zone-assign__row--assigned' : ''}`}
+            >
+              <span className="zone-assign__dot" style={{ background: zone.color }} />
+              <span className="zone-assign__zone-name">{zone.name}</span>
+
+              {isAssigned ? (
+                <button
+                  className="zone-assign__btn zone-assign__btn--remove"
+                  onClick={() => handleRemove(zone.id)}
+                  disabled={removeMutation.isPending}
+                  title="Remove from this zone"
+                >
+                  ✓ Assigned · Remove
+                </button>
+              ) : (
+                <button
+                  className="zone-assign__btn zone-assign__btn--add"
+                  onClick={() => handleAssign(zone.id)}
+                  disabled={assignMutation.isPending}
+                  title={
+                    selectionCount > 1
+                      ? `Assign ${selectionCount} selected elements`
+                      : 'Assign to this zone'
+                  }
+                >
+                  + Assign
+                </button>
+              )}
+            </div>
+          )
+        })}
+
+        {(assignMutation.isError || removeMutation.isError) && (
+          <div className="zone-assign__error">
+            {(assignMutation.error ?? removeMutation.error as Error)?.message}
+          </div>
+        )}
+
+      </div>
+
+    </div>
+  )
+}
+
+
+====================================================================================================
+FILE: src\components\zones\ZoneFilterBar.tsx
+====================================================================================================
+
+import { useLayerStore }  from '../../store/layer.store'
+import { useViewerStore } from '../../store/viewer.store'
+
+export default function ZoneFilterBar() {
+  const activeFilterIds = useLayerStore(s => s.activeFilterIds)
+  const layers          = useLayerStore(s => s.layers)
+  const toggleFilter    = useLayerStore(s => s.toggleFilter)
+  const clearFilters    = useLayerStore(s => s.clearFilters)
+
+  // Restore full visibility in the 3D viewport when clearing zone filters
+  const isolateObjects  = useViewerStore(s => s.isolateObjects)
+
+  if (activeFilterIds.length === 0) return null
+
+  const activeZones = activeFilterIds
+    .map(id => layers.find(l => l.id === id))
+    .filter(Boolean) as { id: string; name: string; color: string }[]
+
+  const handleClearAll = () => {
+    clearFilters()
+    // If objects were isolated by "Show Only", restore full visibility
+    isolateObjects?.([])
+  }
+
+  return (
+    <div className="zone-filter-bar">
+      <span className="zone-filter-bar__label">Zone filter:</span>
+
+      {activeZones.map(zone => (
+        <span key={zone.id} className="zone-chip">
+          <span className="zone-chip__dot"  style={{ background: zone.color }} />
+          <span className="zone-chip__name">{zone.name}</span>
+          <button
+            className="zone-chip__remove"
+            onClick={() => toggleFilter(zone.id)}
+            aria-label={`Remove ${zone.name} filter`}
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+
+      <button
+        className="zone-filter-bar__show-all"
+        onClick={() => isolateObjects?.([])}
+        title="Restore full model visibility"
+      >
+        Show All
+      </button>
+
+      <button
+        className="zone-filter-bar__clear"
+        onClick={handleClearAll}
+      >
+        Clear filters
+      </button>
+    </div>
+  )
+}
+
+
+====================================================================================================
+FILE: src\components\zones\ZonePanel.tsx
+====================================================================================================
+
+import { useState, useCallback, useRef } from 'react'
+import { useLayerStore }                  from '../../store/layer.store'
+import { useViewerStore }                 from '../../store/viewer.store'
+import { useSelectionStore }              from '../../store/selection.store'
+import {
+  useLayers,
+  useLayerCounts,
+  useCreateLayer,
+  useRenameLayer,
+  useDeleteLayer,
+}                                         from '../../hooks/useLayers'
+import { useAssignLayer }                 from '../../hooks/useAssignments'
+import { LAYER_CATEGORY_META }            from '../../types'
+import type { LayerCategory, InformationLayer } from '../../types'
+
+// ── Colour palette for quick picks ───────────────────────────────────────────
+
+const PALETTE = [
+  '#3498DB', '#2ECC71', '#E74C3C', '#F39C12', '#9B59B6',
+  '#1ABC9C', '#E67E22', '#E91E63', '#00BCD4', '#8BC34A',
+  '#FF5722', '#607D8B', '#795548', '#9E9E9E', '#CDDC39',
+]
+
+function randomColor(): string {
+  return PALETTE[Math.floor(Math.random() * PALETTE.length)]
+}
+
+// ── Zone category display ─────────────────────────────────────────────────────
+
+function categoryMeta(category: string) {
+  return (
+    LAYER_CATEGORY_META.find(m => m.value === category) ??
+    { value: category, label: category, icon: '🏷️' }
+  )
+}
+
+// ── Category-contextual placeholder text ──────────────────────────────────────
+
+const CATEGORY_PLACEHOLDER: Record<string, string> = {
+  'building-elements': 'Building element name…',
+  'zones':             'Zone name (e.g. Floor 1, Apartment A101)…',
+  'costs':             'Cost zone name…',
+  'resources':         'Resource group name…',
+  'quality':           'Quality zone name…',
+  'waste':             'Waste zone name…',
+  'safety':            'Safety zone name…',
+  'coclass':           'CoClass zone name…',
+  'ai-generated':      'AI-generated zone name…',
+  'custom':            'Custom zone name…',
+}
+
+function categoryPlaceholder(category: string): string {
+  return CATEGORY_PLACEHOLDER[category] ?? 'Zone name…'
+}
+
+// ── QuickAssignSection ────────────────────────────────────────────────────────
+//
+// Inline assignment UI embedded directly in ZonePanel.
+//
+// Reads the current selection from useSelectionStore (globally accessible —
+// no prop drilling required). Receives zones and counts from ZonePanel so no
+// duplicate React Query subscriptions are created.
+//
+// Uses the existing useAssignLayer() mutation — the same hook used by the
+// Inspector's ZoneAssignWidget — so assignment logic is never duplicated.
+
+interface QuickAssignSectionProps {
+  zones:  InformationLayer[]
+  counts: Map<string, number>
+}
+
+function QuickAssignSection({ zones, counts }: QuickAssignSectionProps) {
+  // ── Selection state ────────────────────────────────────
+  const primaryGlobalId     = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds   = useSelectionStore(s => s.selectedGlobalIds)
+  const getObjectByGlobalId = useViewerStore(s => s.getObjectByGlobalId)
+
+  // ── Local UI state ────────────────────────────────────
+  const [selectedZoneId, setSelectedZoneId] = useState<string>('')
+
+  // ── Assignment mutation ───────────────────────────────
+  const assignMutation = useAssignLayer()
+
+  // ── Derived values ────────────────────────────────────
+  const selectionCount = selectedGlobalIds.size
+  const hasSelection   = selectionCount > 0
+  const primaryObject  = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
+  const hasZones       = zones.length > 0
+
+  // Keep selectedZoneId valid if the zone list changes underneath us
+  const validZoneId = zones.find(z => z.id === selectedZoneId)
+    ? selectedZoneId
+    : (zones[0]?.id ?? '')
+
+  const canAssign = hasSelection && validZoneId.length > 0
+
+  const handleAssign = useCallback(() => {
+    if (!canAssign) return
+    const globalIds = Array.from(selectedGlobalIds)
+    assignMutation.mutate(
+      { layerId: validZoneId, globalIds },
+      {
+        onSuccess: () => {
+          // Reset status after a short delay so the success message is visible
+          setTimeout(() => assignMutation.reset(), 2000)
+        },
+      }
+    )
+  }, [canAssign, selectedGlobalIds, validZoneId, assignMutation])
+
+  // ── Render ────────────────────────────────────────────
+
+  return (
+    <div className="zone-quick-assign">
+
+      {/* Section header */}
+      <div className="zone-quick-assign__title">
+        ASSIGN TO ZONE
+      </div>
+
+      {/* Selection feedback */}
+      <div className="zone-quick-assign__selection">
+        {!hasSelection ? (
+          <p className="zone-quick-assign__no-selection">
+            No IFC object selected.{' '}
+            <span className="zone-quick-assign__no-selection-hint">
+              Select one or more objects in the viewer or tree.
+            </span>
+          </p>
+        ) : selectionCount === 1 && primaryObject ? (
+          <div className="zone-quick-assign__selected-info">
+            <span className="zone-quick-assign__selected-label">Selected object</span>
+            <span className="zone-quick-assign__selected-name" title={primaryObject.globalId}>
+              {primaryObject.name?.trim() || primaryObject.type}
+            </span>
+            <span className="zone-quick-assign__selected-type">{primaryObject.type}</span>
+          </div>
+        ) : (
+          <div className="zone-quick-assign__selected-info">
+            <span className="zone-quick-assign__selected-label">Selected objects</span>
+            <span className="zone-quick-assign__selected-name">
+              {selectionCount} objects selected
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Zone picker + Assign button */}
+      {hasZones ? (
+        <div className="zone-quick-assign__controls">
+          <select
+            className="zone-quick-assign__select"
+            value={validZoneId}
+            onChange={e => {
+              setSelectedZoneId(e.target.value)
+              assignMutation.reset()
+            }}
+            disabled={!hasSelection || assignMutation.isPending}
+            title="Choose a zone"
+          >
+            {zones.map(zone => {
+              const count = counts.get(zone.id) ?? 0
+              return (
+                <option key={zone.id} value={zone.id}>
+                  {zone.name}{count > 0 ? ` (${count})` : ''}
+                </option>
+              )
+            })}
+          </select>
+
+          <button
+            className="zone-quick-assign__btn"
+            onClick={handleAssign}
+            disabled={!canAssign || assignMutation.isPending}
+            title={
+              !hasSelection
+                ? 'Select objects in the viewer first'
+                : !validZoneId
+                ? 'Choose a zone'
+                : `Assign ${selectionCount} object${selectionCount !== 1 ? 's' : ''} to this zone`
+            }
+          >
+            {assignMutation.isPending ? (
+              <>
+                <span className="zone-quick-assign__spinner" />
+                Assigning…
+              </>
+            ) : (
+              'Assign'
+            )}
+          </button>
+        </div>
+      ) : (
+        <p className="zone-quick-assign__no-zones">
+          Create a zone above to start assigning objects.
+        </p>
+      )}
+
+      {/* Success / error feedback */}
+      {assignMutation.isSuccess && (
+        <div className="zone-quick-assign__success">
+          ✓ {Array.from(selectedGlobalIds).length} object
+          {Array.from(selectedGlobalIds).length !== 1 ? 's' : ''} assigned successfully
+        </div>
+      )}
+
+      {assignMutation.isError && (
+        <div className="zone-quick-assign__error">
+          {(assignMutation.error as Error).message}
+        </div>
+      )}
+
+    </div>
+  )
+}
+
+// ── ZoneCard ──────────────────────────────────────────────────────────────────
+
+interface ZoneCardProps {
+  id:          string
+  name:        string
+  color:       string
+  category:    string
+  count:       number
+  isFiltered:  boolean
+  onToggleFilter:   (id: string) => void
+  onShowOnly:       (id: string) => void
+  onDelete:         (id: string) => void
+  onRename:         (id: string, name: string) => void
+}
+
+function ZoneCard({
+  id, name, color, category, count, isFiltered,
+  onToggleFilter, onShowOnly, onDelete, onRename,
+}: ZoneCardProps) {
+  const [editing,  setEditing]  = useState(false)
+  const [editName, setEditName] = useState(name)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const meta = categoryMeta(category)
+
+  const startEdit = () => {
+    setEditName(name)
+    setEditing(true)
+    setTimeout(() => inputRef.current?.select(), 0)
+  }
+
+  const commitEdit = () => {
+    const trimmed = editName.trim()
+    if (trimmed && trimmed !== name) onRename(id, trimmed)
+    setEditing(false)
+  }
+
+  const cancelEdit = () => { setEditName(name); setEditing(false) }
+
+  return (
+    <div className={`zone-card${isFiltered ? ' zone-card--filtered' : ''}`}>
+
+      <button
+        className="zone-card__swatch"
+        style={{ background: color }}
+        title={isFiltered ? 'Remove from filter' : 'Filter by this zone'}
+        onClick={() => onToggleFilter(id)}
+        aria-pressed={isFiltered}
+      />
+
+      <div className="zone-card__body" onDoubleClick={startEdit}>
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="zone-card__name-input"
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={e => {
+              if (e.key === 'Enter')  commitEdit()
+              if (e.key === 'Escape') cancelEdit()
+            }}
+          />
+        ) : (
+          <span className="zone-card__name" title="Double-click to rename">{name}</span>
+        )}
+        <span className="zone-card__category">
+          {meta.icon} {meta.label}
+        </span>
+      </div>
+
+      <span
+        className="zone-card__count"
+        title={`${count} assigned element${count !== 1 ? 's' : ''}`}
+      >
+        {count}
+      </span>
+
+      <div className="zone-card__actions">
+        <button
+          className={`zone-card__action-btn${isFiltered ? ' zone-card__action-btn--active' : ''}`}
+          title={isFiltered ? 'Clear filter' : 'Filter by this zone'}
+          onClick={() => onToggleFilter(id)}
+        >
+          {isFiltered ? '✓ Filtered' : 'Filter'}
+        </button>
+        <button
+          className="zone-card__action-btn zone-card__action-btn--isolate"
+          title="Show only elements in this zone"
+          onClick={() => onShowOnly(id)}
+        >
+          Isolate
+        </button>
+        <button
+          className="zone-card__action-btn zone-card__action-btn--delete"
+          title="Delete zone"
+          onClick={() => onDelete(id)}
+          aria-label={`Delete zone ${name}`}
+        >
+          ✕
+        </button>
+      </div>
+
+    </div>
+  )
+}
+
+// ── CreateZoneForm ─────────────────────────────────────────────────────────────
+
+interface CreateZoneFormProps {
+  category:         LayerCategory
+  onCategoryChange: (category: LayerCategory) => void
+  onSubmit:         (name: string, category: LayerCategory, color: string) => void
+  isLoading:        boolean
+}
+
+function CreateZoneForm({
+  category,
+  onCategoryChange,
+  onSubmit,
+  isLoading,
+}: CreateZoneFormProps) {
+  const [name,  setName]  = useState('')
+  const [color, setColor] = useState(randomColor)
+
+  const meta        = categoryMeta(category)
+  const heading     = meta.label.toUpperCase()
+  const placeholder = categoryPlaceholder(category)
+
+  const handleSubmit = () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    onSubmit(trimmed, category, color)
+    setName('')
+    setColor(randomColor())
+  }
+
+  return (
+    <div className="zone-create-form">
+      <div className="zone-create-form__title">{heading}</div>
+
+      <div className="zone-create-form__row">
+        <input
+          className="zone-create-form__name"
+          type="text"
+          placeholder={placeholder}
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          maxLength={80}
+        />
+        <input
+          type="color"
+          className="zone-create-form__color"
+          value={color}
+          onChange={e => setColor(e.target.value)}
+          title="Choose zone color"
+        />
+      </div>
+
+      <div className="zone-create-form__row">
+        <select
+          className="zone-create-form__category"
+          value={category}
+          onChange={e => onCategoryChange(e.target.value as LayerCategory)}
+        >
+          {LAYER_CATEGORY_META.map(m => (
+            <option key={m.value} value={m.value}>
+              {m.icon} {m.label}
+            </option>
+          ))}
+        </select>
+        <button
+          className="zone-create-form__btn"
+          onClick={handleSubmit}
+          disabled={isLoading || !name.trim()}
+        >
+          {isLoading ? '…' : '＋ Create Zone'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── ZonePanel ──────────────────────────────────────────────────────────────────
+
+export default function ZonePanel() {
+  const { data: zones, isLoading, isError, error } = useLayers()
+  const { data: counts = new Map<string, number>() }  = useLayerCounts()
+
+  const createMutation = useCreateLayer()
+  const renameMutation = useRenameLayer()
+  const deleteMutation = useDeleteLayer()
+
+  const activeFilterIds = useLayerStore(s => s.activeFilterIds)
+  const toggleFilter    = useLayerStore(s => s.toggleFilter)
+  const clearFilters    = useLayerStore(s => s.clearFilters)
+
+  const isolateObjects  = useViewerStore(s => s.isolateObjects)
+  const ifcObjects      = useViewerStore(s => s.ifcObjects)
+  const assignments     = useLayerStore(s => s.assignments)
+
+  const [selectedCategory, setSelectedCategory] = useState<LayerCategory>('zones')
+
+  const handleCreate = useCallback((
+    name: string, category: LayerCategory, color: string,
+  ) => {
+    createMutation.mutate({ payload: { name, category, color, description: null } })
+  }, [createMutation])
+
+  const handleRename = useCallback((id: string, newName: string) => {
+    renameMutation.mutate({ id, newName })
+  }, [renameMutation])
+
+  const handleDelete = useCallback((id: string) => {
+    deleteMutation.mutate(id)
+  }, [deleteMutation])
+
+  const handleShowOnly = useCallback((zoneId: string) => {
+    if (!isolateObjects) return
+    const globalIds = assignments
+      .filter(a => a.layerId === zoneId)
+      .map(a => a.globalId)
+    isolateObjects(globalIds)
+  }, [isolateObjects, assignments])
+
+  const selectedMeta = categoryMeta(selectedCategory)
+  const emptyTitle   = `No ${selectedMeta.label} zones yet`
+  const emptyHint    = `Create your first ${selectedMeta.label} zone above, then select elements in the 3D viewer and assign them using the section below.`
+
+  const zoneList = zones ?? []
+
+  return (
+    <div className="zone-panel">
+
+      {/* ── STICKY: header + create form + assign section ──── */}
+      <div className="zone-panel__sticky">
+
+        <div className="zone-panel__header">
+          <span className="zone-panel__title">Zones</span>
+          {activeFilterIds.length > 0 && (
+            <button
+              className="zone-panel__clear-btn"
+              onClick={clearFilters}
+              title="Clear all zone filters"
+            >
+              Clear Filters ({activeFilterIds.length})
+            </button>
+          )}
+        </div>
+
+        {/* Zone creation */}
+        <CreateZoneForm
+          category={selectedCategory}
+          onCategoryChange={setSelectedCategory}
+          onSubmit={handleCreate}
+          isLoading={createMutation.isPending}
+        />
+
+        {createMutation.isError && (
+          <div className="zone-error">
+            Failed to create zone: {(createMutation.error as Error).message}
+          </div>
+        )}
+
+        {/*
+          Assign Selected to Zone.
+          Passes zones + counts already fetched above — no extra queries.
+          Selection is read from the global selection store inside QuickAssignSection.
+        */}
+        <QuickAssignSection zones={zoneList} counts={counts} />
+
+      </div>
+
+      {/* ── SCROLL: zone cards ────────────────────────────────── */}
+      <div className="zone-panel__scroll">
+
+        {isLoading && (
+          <div className="zone-loading">
+            <div className="upload-spinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
+            <span>Loading zones…</span>
+          </div>
+        )}
+
+        {isError && (
+          <div className="zone-error">
+            {(error as Error).message}
+          </div>
+        )}
+
+        {!isLoading && !isError && (
+          <div className="zone-list">
+            {zoneList.length === 0 ? (
+              <div className="zone-empty">
+                <div className="zone-empty__icon">{selectedMeta.icon}</div>
+                <p className="zone-empty__title">{emptyTitle}</p>
+                <p className="zone-empty__hint">{emptyHint}</p>
+              </div>
+            ) : (
+              zoneList.map(zone => (
+                <ZoneCard
+                  key={zone.id}
+                  id={zone.id}
+                  name={zone.name}
+                  color={zone.color}
+                  category={zone.category}
+                  count={counts.get(zone.id) ?? 0}
+                  isFiltered={activeFilterIds.includes(zone.id)}
+                  onToggleFilter={toggleFilter}
+                  onShowOnly={handleShowOnly}
+                  onDelete={handleDelete}
+                  onRename={handleRename}
+                />
+              ))
+            )}
+          </div>
+        )}
+
+        {activeFilterIds.length > 0 && (
+          <div className="zone-filter-indicator">
+            🔍 Filtering by {activeFilterIds.length} zone{activeFilterIds.length !== 1 ? 's' : ''}
+            {' '}·{' '}
+            {ifcObjects.filter(o =>
+              activeFilterIds.every(id => o.layerIds.includes(id))
+            ).length} elements visible
+          </div>
+        )}
+
+      </div>
+
     </div>
   )
 }
@@ -10412,7 +11921,8 @@ interface ViewerState {
 
   /**
    * Engine action: zoom the camera to fit a single IFC object.
-   * Set by IFCViewer once the ViewerEngine is ready.
+   * Set by IFCViewer once the ViewerEngine is ready (onSceneReady).
+   * Persists across model loads — only cleared on ViewerEngine disposal.
    * null when no engine is mounted.
    */
   zoomToObject:     ((globalId: string) => void) | null
@@ -10420,7 +11930,8 @@ interface ViewerState {
   /**
    * Engine action: isolate one or more IFC objects (hide all others).
    * Passing an empty array restores full visibility.
-   * Set by IFCViewer once the ViewerEngine is ready.
+   * Set by IFCViewer once the ViewerEngine is ready (onSceneReady).
+   * Persists across model loads — only cleared on ViewerEngine disposal.
    * null when no engine is mounted.
    */
   isolateObjects:   ((globalIds: string[]) => void) | null
@@ -10472,15 +11983,40 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     isolateObjects: null,
   }),
 
+  // ── FIX: resetModel resets only MODEL data and load state. ──────────────
+  //
+  // It must NOT null zoomToObject / isolateObjects.
+  //
+  // Root cause of the bug:
+  //   The "Load New Model" button in Layout.tsx calls resetModel() before the
+  //   user uploads the next file.  resetModel previously nulled the engine
+  //   action callbacks.  Because setEngineActions is only called once — inside
+  //   onSceneReady, which fires only during ViewerEngine.init() at component
+  //   mount — those callbacks were never restored after a model replacement.
+  //   Result: Zoom / Isolate buttons remained permanently disabled for every
+  //   model loaded after the first.
+  //
+  // Engine action callbacks (zoomToObject / isolateObjects) are closures that
+  // reference the live ViewerEngine via engineRef.current.  The ViewerEngine
+  // instance is created once at IFCViewer mount and persists across model
+  // loads.  The callbacks remain valid as long as the engine is alive.
+  //
+  // Responsibility split:
+  //   • resetModel()        — clears MODEL data only (objects, tree, state,
+  //                           meta).  Never touches engine action callbacks.
+  //   • clearEngineActions() — called only in the IFCViewer mount-effect
+  //                            cleanup (i.e. on engine disposal / unmount).
+  //                            This is the only correct place to null them.
+  //
   resetModel: () => set({
-    ifcObjects:    [],
-    spatialTree:   null,
-    modelLoadState:'idle',
-    modelError:    null,
-    modelFileName: null,
-    modelFileSize: null,
-    zoomToObject:  null,
-    isolateObjects: null,
+    ifcObjects:     [],
+    spatialTree:    null,
+    modelLoadState: 'idle',
+    modelError:     null,
+    modelFileName:  null,
+    modelFileSize:  null,
+    // zoomToObject  and isolateObjects are intentionally NOT reset here.
+    // See comment above.
   }),
 
   getObjectByGlobalId: (globalId) =>
@@ -11211,6 +12747,1037 @@ FILE: src\styles\upload.css
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+
+====================================================================================================
+FILE: src\styles\zones.css
+====================================================================================================
+
+.panel-tab__badge {
+  background:    var(--accent-blue);
+  border-radius: 8px;
+  color:         #fff;
+  font-size:     9px;
+  font-weight:   700;
+  line-height:   1;
+  margin-left:   5px;
+  min-width:     16px;
+  padding:       2px 4px;
+  text-align:    center;
+  vertical-align: middle;
+}
+
+/* ── Header zone filter badge ─────────────────────────────────
+   Shown in the header bar when zones are being filtered.       */
+
+.bim-badge--zone-filter {
+  background:    rgba(47, 107, 255, 0.12);
+  border-color:  var(--accent-blue);
+  color:         var(--accent-blue);
+  font-weight:   600;
+}
+
+/* ============================================================
+   ZONE PANEL
+   (replaces LayerPanel)
+   ============================================================ */
+
+.zone-panel {
+  display:        flex;
+  flex-direction: column;
+  height:         100%;
+  overflow:       hidden;
+}
+
+/* ── Sticky zone: header + create form + assign section ────────
+   flex-shrink: 0  — never compressed by flex layout.
+   overflow-y: auto — if the sticky content is ever taller than
+   max-height (e.g. on a very small panel), it scrolls internally
+   rather than pushing the zone list scroll zone to zero height.
+   max-height: 55% — caps how much of the panel the sticky section
+   can occupy, guaranteeing the zone list always has visible space.
+   This value comfortably fits the header + create form +
+   assign section at typical panel sizes while preventing the
+   sticky section from growing unboundedly when the assign section
+   has verbose content (success/error messages, multi-line hints). */
+
+.zone-panel__sticky {
+  flex-shrink: 0;
+  max-height:  55%;
+  overflow-y:  auto;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+
+.zone-panel__sticky::-webkit-scrollbar       { width: 4px; }
+.zone-panel__sticky::-webkit-scrollbar-track  { background: transparent; }
+.zone-panel__sticky::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Scroll zone: zone card list ─────────────────────────────
+   Takes all remaining height. Scrolls independently.           */
+
+.zone-panel__scroll {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+
+.zone-panel__scroll::-webkit-scrollbar       { width: 4px; }
+.zone-panel__scroll::-webkit-scrollbar-track  { background: transparent; }
+.zone-panel__scroll::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Panel header ─────────────────────────────────────────────
+   Title + "Clear Filters" button.                              */
+
+.zone-panel__header {
+  align-items:     center;
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  justify-content: space-between;
+  padding:         10px 14px 8px;
+}
+
+.zone-panel__title {
+  color:          var(--text-secondary);
+  font-size:      11px;
+  font-weight:    700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.zone-panel__clear-btn {
+  background:    rgba(231, 76, 60, 0.12);
+  border:        1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 5px;
+  color:         #e74c3c;
+  cursor:        pointer;
+  font-size:     11px;
+  padding:       3px 8px;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+}
+.zone-panel__clear-btn:hover { background: rgba(231, 76, 60, 0.22); }
+
+/* ── Zone create form ─────────────────────────────────────────
+   Compact two-row form at the top of the panel.                */
+
+.zone-create-form {
+  border-bottom:  1px solid var(--border-color);
+  display:        flex;
+  flex-direction: column;
+  gap:            6px;
+  padding:        10px 14px;
+}
+
+.zone-create-form__title {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom:  2px;
+}
+
+.zone-create-form__row {
+  display: flex;
+  gap:     6px;
+}
+
+.zone-create-form__name {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  outline:       none;
+  padding:       6px 10px;
+  transition:    border-color 0.15s;
+}
+.zone-create-form__name::placeholder { color: var(--text-secondary); opacity: 0.6; }
+.zone-create-form__name:focus        { border-color: var(--accent-blue); }
+
+.zone-create-form__color {
+  background:  transparent;
+  border:      1px solid var(--border-color);
+  border-radius: 6px;
+  cursor:      pointer;
+  flex-shrink: 0;
+  height:      32px;
+  padding:     2px;
+  width:       34px;
+}
+
+.zone-create-form__category {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  cursor:        pointer;
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  outline:       none;
+  padding:       5px 8px;
+}
+.zone-create-form__category option { background: var(--bg-panel); color: var(--text-primary); }
+
+.zone-create-form__btn {
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  cursor:        pointer;
+  flex-shrink:   0;
+  font-size:     12px;
+  font-weight:   600;
+  padding:       6px 12px;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+}
+.zone-create-form__btn:hover:not(:disabled) { background: #1a5ce8; }
+.zone-create-form__btn:disabled             { cursor: default; opacity: 0.4; }
+
+/* ── Zone card list ───────────────────────────────────────────
+   Vertical list of zone cards.                                 */
+
+.zone-list {
+  padding: 8px 0 12px;
+}
+
+/* ── Zone card ────────────────────────────────────────────────
+   Each zone is a horizontal card with:
+   [swatch] [name + category] [count] [action strip]            */
+
+.zone-card {
+  align-items: center;
+  display:     flex;
+  gap:         10px;
+  padding:     8px 14px;
+  position:    relative;
+  transition:  background 0.1s;
+}
+.zone-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Active filter state — left accent bar */
+.zone-card--filtered {
+  background:   rgba(47, 107, 255, 0.07);
+  border-left:  3px solid var(--accent-blue);
+  padding-left: 11px;
+}
+
+/* Color swatch — double as filter toggle */
+.zone-card__swatch {
+  border:        2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  cursor:        pointer;
+  flex-shrink:   0;
+  height:        16px;
+  transition:    transform 0.12s, border-color 0.12s;
+  width:         16px;
+}
+.zone-card__swatch:hover          { border-color: #fff; transform: scale(1.2); }
+.zone-card--filtered .zone-card__swatch { border-color: #fff; }
+
+/* Name + category column */
+.zone-card__body {
+  display:        flex;
+  flex:           1;
+  flex-direction: column;
+  gap:            2px;
+  min-width:      0;
+}
+
+.zone-card__name {
+  color:         var(--text-primary);
+  cursor:        text;
+  font-size:     12px;
+  font-weight:   500;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zone-card__name-input {
+  background:    rgba(255, 255, 255, 0.08);
+  border:        1px solid var(--accent-blue);
+  border-radius: 4px;
+  color:         var(--text-primary);
+  font-size:     12px;
+  outline:       none;
+  padding:       2px 6px;
+  width:         100%;
+}
+
+.zone-card__category {
+  color:     var(--text-secondary);
+  font-size: 10px;
+}
+
+/* Element count badge */
+.zone-card__count {
+  background:    rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  color:         var(--text-secondary);
+  flex-shrink:   0;
+  font-size:     10px;
+  font-weight:   600;
+  min-width:     22px;
+  padding:       2px 6px;
+  text-align:    center;
+}
+
+/* Action strip — Filter / Isolate / Delete */
+.zone-card__actions {
+  align-items: center;
+  display:     flex;
+  flex-shrink: 0;
+  gap:         4px;
+  opacity:     0;
+  transition:  opacity 0.15s;
+}
+.zone-card:hover .zone-card__actions { opacity: 1; }
+
+.zone-card__action-btn {
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid transparent;
+  border-radius: 4px;
+  color:         var(--text-secondary);
+  cursor:        pointer;
+  font-size:     10px;
+  padding:       2px 7px;
+  transition:    all 0.12s;
+  white-space:   nowrap;
+}
+.zone-card__action-btn:hover {
+  background:   rgba(255, 255, 255, 0.12);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+.zone-card__action-btn--active {
+  background:   rgba(47, 107, 255, 0.18);
+  border-color: var(--accent-blue);
+  color:        var(--accent-blue);
+}
+.zone-card__action-btn--isolate:hover {
+  background:   rgba(46, 204, 113, 0.15);
+  border-color: var(--accent-green);
+  color:        var(--accent-green);
+}
+.zone-card__action-btn--delete:hover {
+  background:   rgba(231, 76, 60, 0.15);
+  border-color: #e74c3c;
+  color:        #e74c3c;
+}
+
+/* ── State messages ───────────────────────────────────────────  */
+
+.zone-empty {
+  padding:    32px 20px;
+  text-align: center;
+}
+.zone-empty__icon  { font-size: 28px; margin-bottom: 10px; }
+.zone-empty__title {
+  color:         var(--text-primary);
+  font-size:     13px;
+  font-weight:   600;
+  margin-bottom: 6px;
+}
+.zone-empty__hint {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  line-height: 1.5;
+}
+
+.zone-loading {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   12px;
+  gap:         8px;
+  padding:     16px 14px;
+}
+
+.zone-error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+  word-break:    break-word;
+}
+
+.zone-filter-indicator {
+  border-top:  1px solid var(--border-color);
+  color:       var(--accent-blue);
+  font-size:   11px;
+  margin-top:  auto;
+  padding:     8px 14px;
+  text-align:  center;
+}
+
+/* ============================================================
+   ZONE ASSIGN WIDGET
+   Inline assignment panel inside the Inspector
+   ============================================================ */
+
+.zone-assign {
+  background:    rgba(255, 255, 255, 0.025);
+  border:        1px solid var(--border-color);
+  border-radius: 8px;
+  display:       flex;
+  flex-direction: column;
+  margin:        0 10px 2px;
+  max-height:    340px;
+  overflow:      hidden;
+}
+
+/* ── Widget header ────────────────────────────────────────────  */
+
+.zone-assign__header {
+  align-items:     center;
+  background:      rgba(47, 107, 255, 0.08);
+  border-bottom:   1px solid rgba(47, 107, 255, 0.2);
+  display:         flex;
+  justify-content: space-between;
+  padding:         8px 12px;
+}
+
+.zone-assign__header-info {
+  display:        flex;
+  flex-direction: column;
+  gap:            2px;
+  min-width:      0;
+}
+
+.zone-assign__header-title {
+  color:       var(--accent-blue);
+  font-size:   11px;
+  font-weight: 700;
+}
+
+.zone-assign__header-sub {
+  color:         var(--text-secondary);
+  font-size:     10px;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zone-assign__multi {
+  color:       var(--accent-blue);
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.zone-assign__close {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  flex-shrink: 0;
+  font-size:   13px;
+  line-height: 1;
+  padding:     2px 4px;
+  transition:  color 0.1s;
+}
+.zone-assign__close:hover { color: var(--text-primary); }
+
+/* ── Quick create wrapper ─────────────────────────────────────  */
+
+.zone-assign__create-wrap {
+  border-bottom: 1px solid var(--border-color);
+  padding:       8px 12px;
+}
+
+/* "＋ Create new zone" toggle button */
+.zone-assign__create-toggle {
+  background:    transparent;
+  border:        1px dashed rgba(47, 107, 255, 0.4);
+  border-radius: 6px;
+  color:         var(--accent-blue);
+  cursor:        pointer;
+  font-size:     11px;
+  padding:       5px 10px;
+  transition:    all 0.12s;
+  width:         100%;
+  text-align:    left;
+}
+.zone-assign__create-toggle:hover {
+  background:   rgba(47, 107, 255, 0.08);
+  border-color: var(--accent-blue);
+}
+
+/* Expanded quick-create form */
+.zone-assign__create-form {
+  display:        flex;
+  flex-direction: column;
+  gap:            6px;
+}
+
+.zone-assign__create-input {
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid var(--accent-blue);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  font-size:     12px;
+  outline:       none;
+  padding:       6px 10px;
+  width:         100%;
+}
+
+.zone-assign__create-color {
+  background:    transparent;
+  border:        1px solid var(--border-color);
+  border-radius: 4px;
+  cursor:        pointer;
+  height:        28px;
+  padding:       2px;
+  width:         32px;
+}
+
+.zone-assign__create-cat {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 5px;
+  color:         var(--text-primary);
+  cursor:        pointer;
+  flex:          1;
+  font-size:     11px;
+  outline:       none;
+  padding:       4px 6px;
+}
+.zone-assign__create-cat option { background: var(--bg-panel); }
+
+.zone-assign__create-actions {
+  display: flex;
+  gap:     6px;
+}
+
+.zone-assign__create-btn {
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 5px;
+  color:         #fff;
+  cursor:        pointer;
+  flex:          1;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       5px 8px;
+  transition:    background 0.12s;
+}
+.zone-assign__create-btn:hover:not(:disabled) { background: #1a5ce8; }
+.zone-assign__create-btn:disabled             { cursor: default; opacity: 0.4; }
+
+.zone-assign__cancel-btn {
+  background:  transparent;
+  border:      1px solid var(--border-color);
+  border-radius: 5px;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  font-size:   11px;
+  padding:     5px 10px;
+  transition:  all 0.12s;
+}
+.zone-assign__cancel-btn:hover {
+  border-color: var(--text-secondary);
+  color:        var(--text-primary);
+}
+
+/* ── Zone list inside widget ──────────────────────────────────  */
+
+.zone-assign__list {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  padding:    4px 0;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+.zone-assign__list::-webkit-scrollbar       { width: 3px; }
+.zone-assign__list::-webkit-scrollbar-track  { background: transparent; }
+.zone-assign__list::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+.zone-assign__row {
+  align-items: center;
+  display:     flex;
+  gap:         8px;
+  padding:     5px 12px;
+  transition:  background 0.1s;
+}
+.zone-assign__row:hover            { background: rgba(255, 255, 255, 0.04); }
+.zone-assign__row--assigned        {
+  background:   rgba(46, 204, 113, 0.05);
+  border-left:  2px solid #2ecc71;
+  padding-left: 10px;
+}
+
+.zone-assign__dot {
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        10px;
+  width:         10px;
+}
+
+.zone-assign__zone-name {
+  color:         var(--text-primary);
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zone-assign__btn {
+  border-radius: 5px;
+  border:        none;
+  cursor:        pointer;
+  flex-shrink:   0;
+  font-size:     10px;
+  font-weight:   600;
+  padding:       3px 8px;
+  transition:    background 0.12s;
+  white-space:   nowrap;
+}
+.zone-assign__btn--add {
+  background: rgba(47, 107, 255, 0.14);
+  border:     1px solid rgba(47, 107, 255, 0.3);
+  color:      var(--accent-blue);
+}
+.zone-assign__btn--add:hover:not(:disabled) { background: rgba(47, 107, 255, 0.26); }
+
+.zone-assign__btn--remove {
+  background: rgba(46, 204, 113, 0.1);
+  border:     1px solid rgba(46, 204, 113, 0.25);
+  color:      var(--accent-green);
+}
+.zone-assign__btn--remove:hover:not(:disabled) { background: rgba(46, 204, 113, 0.22); }
+
+.zone-assign__btn:disabled { cursor: default; opacity: 0.4; }
+
+.zone-assign__loading {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   11px;
+  gap:         6px;
+  padding:     12px;
+}
+
+.zone-assign__empty {
+  color:      var(--text-secondary);
+  font-size:  11px;
+  padding:    14px 12px;
+  text-align: center;
+}
+
+.zone-assign__error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     10px;
+  margin:        4px 12px;
+  padding:       6px 8px;
+}
+
+/* ============================================================
+   ZONE FILTER BAR
+   Below the 3D viewport when zone filters are active.
+   ============================================================ */
+
+.zone-filter-bar {
+  align-items:  center;
+  background:   var(--bg-secondary);
+  border-top:   1px solid var(--border-color);
+  display:      flex;
+  flex-shrink:  0;
+  flex-wrap:    wrap;
+  gap:          6px;
+  padding:      6px 14px;
+}
+
+.zone-filter-bar__label {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space:    nowrap;
+}
+
+/* Zone chip — active zone filter pill */
+.zone-chip {
+  align-items:   center;
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid var(--border-color);
+  border-radius: 14px;
+  display:       inline-flex;
+  gap:           5px;
+  padding:       3px 6px 3px 8px;
+}
+
+.zone-chip__dot {
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        8px;
+  width:         8px;
+}
+
+.zone-chip__name {
+  color:       var(--text-primary);
+  font-size:   11px;
+  font-weight: 500;
+}
+
+.zone-chip__remove {
+  align-items:     center;
+  background:      transparent;
+  border:          none;
+  border-radius:   50%;
+  color:           var(--text-secondary);
+  cursor:          pointer;
+  display:         flex;
+  font-size:       10px;
+  height:          16px;
+  justify-content: center;
+  line-height:     1;
+  transition:      color 0.1s, background 0.1s;
+  width:           16px;
+}
+.zone-chip__remove:hover {
+  background: rgba(231, 76, 60, 0.2);
+  color:      #e74c3c;
+}
+
+/* "Show All" button — restores full visibility */
+.zone-filter-bar__show-all {
+  background:    rgba(46, 204, 113, 0.1);
+  border:        1px solid rgba(46, 204, 113, 0.25);
+  border-radius: 5px;
+  color:         var(--accent-green);
+  cursor:        pointer;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       3px 10px;
+  transition:    background 0.12s;
+  white-space:   nowrap;
+}
+.zone-filter-bar__show-all:hover { background: rgba(46, 204, 113, 0.2); }
+
+/* "Clear filters" button */
+.zone-filter-bar__clear {
+  background:    transparent;
+  border:        1px solid var(--border-color);
+  border-radius: 5px;
+  color:         var(--text-secondary);
+  cursor:        pointer;
+  font-size:     11px;
+  margin-left:   auto;
+  padding:       3px 10px;
+  transition:    all 0.12s;
+  white-space:   nowrap;
+}
+.zone-filter-bar__clear:hover {
+  border-color: #e74c3c;
+  color:        #e74c3c;
+}
+
+/* ============================================================
+   INSPECTOR additions for zone assignment
+   ============================================================ */
+
+/* Multi-selection badge in element header */
+.insp-multi-badge {
+  background:    rgba(47, 107, 255, 0.15);
+  border:        1px solid rgba(47, 107, 255, 0.35);
+  border-radius: 10px;
+  color:         var(--accent-blue);
+  flex-shrink:   0;
+  font-size:     10px;
+  font-weight:   600;
+  margin-left:   auto;
+  padding:       2px 8px;
+  white-space:   nowrap;
+}
+
+/* "Assign Zone" action button variant */
+.action-btn--zone {
+  position: relative;
+}
+
+/* Badge on "Assign Zone" button showing number of assigned zones */
+.action-btn__badge {
+  background:    var(--accent-blue);
+  border-radius: 8px;
+  color:         #fff;
+  font-size:     9px;
+  font-weight:   700;
+  margin-left:   4px;
+  min-width:     14px;
+  padding:       1px 4px;
+  text-align:    center;
+  vertical-align: middle;
+}
+
+/* Assigned zones summary row (shown when widget is closed) */
+.insp-zones-summary {
+  align-items:   flex-start;
+  border-bottom: 1px solid var(--border-color);
+  display:       flex;
+  gap:           10px;
+  padding:       7px 14px;
+}
+
+.insp-zones-summary__label {
+  color:          var(--text-secondary);
+  flex-shrink:    0;
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.06em;
+  margin-top:     2px;
+  text-transform: uppercase;
+}
+
+.insp-zones-summary__chips {
+  display:   flex;
+  flex-wrap: wrap;
+  gap:       4px;
+}
+
+.insp-zone-chip {
+  align-items:   center;
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid var(--border-color);
+  border-radius: 10px;
+  color:         var(--text-primary);
+  display:       inline-flex;
+  font-size:     10px;
+  gap:           5px;
+  padding:       2px 8px 2px 5px;
+}
+
+.insp-zone-chip__dot {
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        7px;
+  width:         7px;
+}
+
+/* ============================================================
+   LEGACY COMPATIBILITY
+   Keep old .assign-section styles working if any file still
+   references them (LayerAssignmentPanel may remain imported
+   somewhere during a transition period).
+   ============================================================ */
+
+.assign-loading {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   12px;
+  gap:         8px;
+  padding:     12px 14px;
+}
+
+.assign-error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        6px 14px;
+  padding:       6px 8px;
+}
+
+.assign-empty {
+  color:       var(--text-secondary);
+  font-size:   12px;
+  line-height: 1.5;
+  padding:     20px 14px;
+  text-align:  center;
+}
+
+/* ============================================================
+   QUICK ASSIGN SECTION
+   Inline assignment panel inside ZonePanel sticky area.
+   All classes prefixed .zone-quick-assign to avoid collisions.
+   ============================================================ */
+
+.zone-quick-assign {
+  border-bottom:  1px solid var(--border-color);
+  display:        flex;
+  flex-direction: column;
+  gap:            8px;
+  padding:        10px 14px;
+}
+
+/* ── Section title ────────────────────────────────────────────  */
+
+.zone-quick-assign__title {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ── Selection feedback area ──────────────────────────────────  */
+
+.zone-quick-assign__selection {
+  min-height: 34px;
+}
+
+/* No selection state */
+.zone-quick-assign__no-selection {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  line-height: 1.5;
+  margin:      0;
+}
+
+.zone-quick-assign__no-selection-hint {
+  display:   block;
+  font-size: 10px;
+  opacity:   0.7;
+}
+
+/* Active selection state */
+.zone-quick-assign__selected-info {
+  display:        flex;
+  flex-direction: column;
+  gap:            2px;
+}
+
+.zone-quick-assign__selected-label {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.zone-quick-assign__selected-name {
+  color:         var(--text-primary);
+  font-size:     12px;
+  font-weight:   500;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zone-quick-assign__selected-type {
+  color:       var(--accent-blue);
+  font-size:   10px;
+  font-weight: 500;
+}
+
+/* ── Zone dropdown + Assign button row ────────────────────────  */
+
+.zone-quick-assign__controls {
+  display: flex;
+  gap:     6px;
+}
+
+.zone-quick-assign__select {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  cursor:        pointer;
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  outline:       none;
+  padding:       6px 8px;
+  transition:    border-color 0.15s;
+}
+.zone-quick-assign__select:focus    { border-color: var(--accent-blue); }
+.zone-quick-assign__select:disabled { cursor: default; opacity: 0.5; }
+.zone-quick-assign__select option   { background: var(--bg-panel); color: var(--text-primary); }
+
+.zone-quick-assign__btn {
+  align-items:   center;
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  cursor:        pointer;
+  display:       flex;
+  flex-shrink:   0;
+  font-size:     12px;
+  font-weight:   600;
+  gap:           6px;
+  padding:       6px 14px;
+  transition:    background 0.15s, opacity 0.15s;
+  white-space:   nowrap;
+}
+.zone-quick-assign__btn:hover:not(:disabled) { background: #1a5ce8; }
+.zone-quick-assign__btn:disabled             { cursor: default; opacity: 0.4; }
+
+/* Inline spinner inside button */
+.zone-quick-assign__spinner {
+  animation:        spin 0.7s linear infinite;
+  border:           2px solid rgba(255, 255, 255, 0.35);
+  border-radius:    50%;
+  border-top-color: #fff;
+  display:          inline-block;
+  flex-shrink:      0;
+  height:           12px;
+  width:            12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── No zones state ───────────────────────────────────────────  */
+
+.zone-quick-assign__no-zones {
+  color:     var(--text-secondary);
+  font-size: 11px;
+  margin:    0;
+}
+
+/* ── Success message ──────────────────────────────────────────  */
+
+.zone-quick-assign__success {
+  background:    rgba(46, 204, 113, 0.1);
+  border:        1px solid rgba(46, 204, 113, 0.25);
+  border-radius: 5px;
+  color:         var(--accent-green);
+  font-size:     11px;
+  font-weight:   500;
+  padding:       5px 8px;
+}
+
+/* ── Error message ────────────────────────────────────────────  */
+
+.zone-quick-assign__error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     10px;
+  padding:       5px 8px;
 }
 
 
@@ -13386,6 +15953,75 @@ export class ViewerEngine {
     } catch {
       this.config.onObjectPicked(null, false)
     }
+  }
+
+  // ── Selection label support ───────────────────────────────
+
+  /**
+   * Resolves the world-space top-center point of an IFC object's
+   * bounding box. Used by SelectionLabel to compute screen position.
+   *
+   * Returns null when:
+   * - FragmentsManager is not initialized
+   * - No models are loaded
+   * - The GlobalId is not found in any model
+   * - The resolved bounding box is empty (unloaded tile)
+   *
+   * The caller (SelectionLabel RAF loop) is responsible for caching
+   * the result and re-projecting it to screen space on every frame.
+   */
+  async getObjectWorldTop(globalId: string): Promise<THREE.Vector3 | null> {
+    if (!this.fragmentsManager?.initialized) return null
+    if (this.loadedModels.length === 0) return null
+
+    for (const model of this.loadedModels) {
+      const internal = model as unknown as FragmentsModelInternal
+
+      let localIds: (number | null)[] = []
+      try {
+        localIds = await internal.getLocalIdsByGuids([globalId])
+      } catch {
+        continue
+      }
+
+      const localId = localIds[0]
+      if (localId === null || localId === undefined) continue
+
+      let box: THREE.Box3
+      try {
+        box = await internal.getMergedBox([localId])
+      } catch {
+        // Fallback: search model object for a rough bbox
+        box = new THREE.Box3()
+        box.setFromObject(model.object)
+      }
+
+      if (box.isEmpty()) return null
+
+      // Top-center of the bounding box in world space
+      const center = new THREE.Vector3()
+      box.getCenter(center)
+      return new THREE.Vector3(center.x, box.max.y, center.z)
+    }
+
+    return null
+  }
+
+  /**
+   * Returns the Three.js PerspectiveCamera instance.
+   * Used by SelectionLabel for world-to-screen projection.
+   */
+  getCamera(): THREE.PerspectiveCamera | null {
+    if (!this.world?.camera?.three) return null
+    return this.world.camera.three as THREE.PerspectiveCamera
+  }
+
+  /**
+   * Returns the viewer container element.
+   * Used by SelectionLabel to read clientWidth/clientHeight for NDC → px conversion.
+   */
+  getContainerElement(): HTMLDivElement {
+    return this.config.container
   }
 
   // ── Getters ───────────────────────────────────────────────

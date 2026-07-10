@@ -558,6 +558,75 @@ export class ViewerEngine {
     }
   }
 
+  // ── Selection label support ───────────────────────────────
+
+  /**
+   * Resolves the world-space top-center point of an IFC object's
+   * bounding box. Used by SelectionLabel to compute screen position.
+   *
+   * Returns null when:
+   * - FragmentsManager is not initialized
+   * - No models are loaded
+   * - The GlobalId is not found in any model
+   * - The resolved bounding box is empty (unloaded tile)
+   *
+   * The caller (SelectionLabel RAF loop) is responsible for caching
+   * the result and re-projecting it to screen space on every frame.
+   */
+  async getObjectWorldTop(globalId: string): Promise<THREE.Vector3 | null> {
+    if (!this.fragmentsManager?.initialized) return null
+    if (this.loadedModels.length === 0) return null
+
+    for (const model of this.loadedModels) {
+      const internal = model as unknown as FragmentsModelInternal
+
+      let localIds: (number | null)[] = []
+      try {
+        localIds = await internal.getLocalIdsByGuids([globalId])
+      } catch {
+        continue
+      }
+
+      const localId = localIds[0]
+      if (localId === null || localId === undefined) continue
+
+      let box: THREE.Box3
+      try {
+        box = await internal.getMergedBox([localId])
+      } catch {
+        // Fallback: search model object for a rough bbox
+        box = new THREE.Box3()
+        box.setFromObject(model.object)
+      }
+
+      if (box.isEmpty()) return null
+
+      // Top-center of the bounding box in world space
+      const center = new THREE.Vector3()
+      box.getCenter(center)
+      return new THREE.Vector3(center.x, box.max.y, center.z)
+    }
+
+    return null
+  }
+
+  /**
+   * Returns the Three.js PerspectiveCamera instance.
+   * Used by SelectionLabel for world-to-screen projection.
+   */
+  getCamera(): THREE.PerspectiveCamera | null {
+    if (!this.world?.camera?.three) return null
+    return this.world.camera.three as THREE.PerspectiveCamera
+  }
+
+  /**
+   * Returns the viewer container element.
+   * Used by SelectionLabel to read clientWidth/clientHeight for NDC → px conversion.
+   */
+  getContainerElement(): HTMLDivElement {
+    return this.config.container
+  }
+
   // ── Getters ───────────────────────────────────────────────
 
   getScene(): THREE.Scene         { return this.world.scene.three }

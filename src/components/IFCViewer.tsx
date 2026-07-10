@@ -8,6 +8,7 @@ import { useUIStore }          from '../store/ui.store'
 import { useLayerStore }       from '../store/layer.store'
 import { FilterEngine }        from '../core/filter/FilterEngine'
 import IFCUploadZone           from '../features/viewer/IFCUploadZone'
+import SelectionLabel          from './SelectionLabel'
 import { useAllAssignments, useGlobalIdLayerMap } from '../hooks/useAssignments'
 
 export default function IFCViewer() {
@@ -299,6 +300,16 @@ export default function IFCViewer() {
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#070B0F' }}>
 
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+      {/*
+        ── Selection Label ──────────────────────────────────────────────────────
+        Always mounted. Manages its own visibility via RAF + direct DOM mutation.
+        Positioned inside the viewer container so it clips to the 3D viewport.
+        Rendered only when a model is loaded (no label over loading/error states).
+      */}
+      {modelLoadState === 'loaded' && (
+        <SelectionLabel engineRef={engineRef} />
+      )}
 
       {showInitializing && (
         <div style={{
