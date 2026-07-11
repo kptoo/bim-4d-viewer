@@ -121,7 +121,7 @@ function PropertyValue({ prop }: { prop: IFCProperty }) {
   return <span className="insp-val-string">{str}{unit && <span className="insp-val-unit"> {unit}</span>}</span>
 }
 
-// ─── Pset section ────────────────────────────────────────────────────────────
+// ─── Pset section ─────────────────────────────────────────────────────────────
 
 interface PsetSectionProps {
   psetName:   string
@@ -186,9 +186,9 @@ function ActivityCard({ activity, status }: { activity: Activity; status: Simula
 
 export default function IFCInspector() {
   // ── Selection state ────────────────────────────────────────
-  const primaryGlobalId        = useSelectionStore(s => s.primaryGlobalId)
-  const selectedGlobalIds      = useSelectionStore(s => s.selectedGlobalIds)
-  const selectedActivityId     = useSelectionStore(s => s.selectedActivityId)
+  const primaryGlobalId    = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds  = useSelectionStore(s => s.selectedGlobalIds)
+  const selectedActivityId = useSelectionStore(s => s.selectedActivityId)
 
   // ── Domain data ───────────────────────────────────────────
   const getObjectByGlobalId    = useViewerStore(s => s.getObjectByGlobalId)
@@ -200,10 +200,7 @@ export default function IFCInspector() {
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
 
-  // ── Zone assignment widget state ──────────────────────────
-  const [zoneWidgetOpen, setZoneWidgetOpen] = useState(false)
-
-  // ── Isolation toggle state ─────────────────────────────────
+  // ── Isolation toggle ───────────────────────────────────────
   const [isIsolated, setIsIsolated] = useState(false)
 
   const ifcObject: IFCObject | undefined | null = primaryGlobalId
@@ -216,7 +213,7 @@ export default function IFCInspector() {
       ? getActivitiesForObject(ifcObject.globalId)[0]
       : undefined
 
-  // Zones (previously "layers") assigned to this object
+  // Zones assigned to this object — used for the badge count on the section header
   const assignedZones = ifcObject ? getLayersForObject(ifcObject.globalId) : []
 
   const frames = computeAllFrames(activities)
@@ -224,7 +221,7 @@ export default function IFCInspector() {
     ? (frames.get(ifcObject.globalId)?.status ?? 'future')
     : 'future'
 
-  // ── Group and sort property sets ──────────────────────────
+  // ── Property sets ─────────────────────────────────────────
   const { psetNames, psetMap } = useMemo(() => {
     if (!ifcObject) return { psetNames: [], psetMap: new Map<string, IFCProperty[]>() }
 
@@ -255,7 +252,6 @@ export default function IFCInspector() {
 
   const handleIsolate = useCallback(() => {
     if (!ifcObject || !isolateObjects) return
-
     if (isIsolated) {
       isolateObjects([])
       setIsIsolated(false)
@@ -267,12 +263,6 @@ export default function IFCInspector() {
       setIsIsolated(true)
     }
   }, [ifcObject, isolateObjects, isIsolated, selectedGlobalIds])
-
-  // Close zone widget and reset isolation when selection changes
-  const prevGlobalId = primaryGlobalId
-  if (isIsolated && prevGlobalId !== primaryGlobalId) {
-    setIsIsolated(false)
-  }
 
   // ── Empty state ───────────────────────────────────────────
   if (!ifcObject) {
@@ -302,7 +292,6 @@ export default function IFCInspector() {
             <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
           </div>
         </div>
-        {/* Multi-selection indicator */}
         {selectedGlobalIds.size > 1 && (
           <div className="insp-multi-badge">
             +{selectedGlobalIds.size - 1} selected
@@ -311,10 +300,6 @@ export default function IFCInspector() {
       </div>
 
       {/* ── Quick Actions ─────────────────────────────────────── */}
-      {/*
-        Moved ABOVE property data so it's immediately visible on selection.
-        Primary workflow: select → see actions → act.
-      */}
       <div className="insp-actions">
         <button
           className="action-btn"
@@ -342,28 +327,6 @@ export default function IFCInspector() {
           {isIsolated ? '👁 Show All' : '💡 Isolate'}
         </button>
 
-        {/*
-          "Assign Zone" — the primary new action.
-          Opens the ZoneAssignWidget inline below the action bar.
-          The zone-assign button gains an --active state while the widget is open.
-        */}
-        <button
-          className={`action-btn action-btn--zone${zoneWidgetOpen ? ' action-btn--active' : ''}`}
-          onClick={() => setZoneWidgetOpen(v => !v)}
-          title={
-            zoneWidgetOpen
-              ? 'Close zone assignment'
-              : selectedGlobalIds.size > 1
-                ? `Assign ${selectedGlobalIds.size} selected elements to a zone`
-                : 'Assign this element to a zone'
-          }
-        >
-          📐 {zoneWidgetOpen ? 'Close' : 'Assign Zone'}
-          {assignedZones.length > 0 && !zoneWidgetOpen && (
-            <span className="action-btn__badge">{assignedZones.length}</span>
-          )}
-        </button>
-
         <button
           className="action-btn"
           disabled={!linkedActivity}
@@ -373,30 +336,24 @@ export default function IFCInspector() {
         </button>
       </div>
 
-      {/* ── Zone Assignment Widget (inline, collapsible) ─────── */}
       {/*
-        Renders directly below the action bar when zoneWidgetOpen = true.
-        Does not navigate away; no tab switch required.
-      */}
-      <ZoneAssignWidget
-        isOpen={zoneWidgetOpen}
-        onClose={() => setZoneWidgetOpen(false)}
-      />
+        ── Zone Assignment ─────────────────────────────────────────────────────
+        Rendered as a permanent Section immediately below the action bar.
+        Always open by default (defaultOpen={true}) — no toggle required.
+        The badge shows the count of currently assigned zones at a glance.
 
-      {/* ── Assigned Zones summary ────────────────────────────── */}
-      {assignedZones.length > 0 && !zoneWidgetOpen && (
-        <div className="insp-zones-summary">
-          <span className="insp-zones-summary__label">Zones</span>
-          <div className="insp-zones-summary__chips">
-            {assignedZones.map(z => (
-              <span key={z.id} className="insp-zone-chip">
-                <span className="insp-zone-chip__dot" style={{ background: z.color }} />
-                {z.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+        This is the Archicad-style workflow:
+          Select object → Inspector shows Zone Assignment → Assign.
+        No tab switching. No scrolling. No hidden panel to discover.
+      */}
+      <Section
+        title="Zone Assignment"
+        defaultOpen={true}
+        badge={assignedZones.length > 0 ? assignedZones.length : undefined}
+        accentColor="var(--accent-blue)"
+      >
+        <ZoneAssignWidget />
+      </Section>
 
       {/* ── Identity Data ─────────────────────────────────────── */}
       <Section title="Identity Data" defaultOpen={false}>

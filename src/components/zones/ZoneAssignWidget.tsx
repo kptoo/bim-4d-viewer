@@ -1,17 +1,17 @@
 import { useState, useCallback } from 'react'
-import { useSelectionStore }      from '../../store/selection.store'
-import { useViewerStore }         from '../../store/viewer.store'
-import { useLayerStore }          from '../../store/layer.store'
+import { useSelectionStore }       from '../../store/selection.store'
+import { useViewerStore }          from '../../store/viewer.store'
+import { useLayerStore }           from '../../store/layer.store'
 import {
   useAssignmentsByGlobalId,
   useAssignLayer,
   useRemoveObjectFromLayer,
-}                                 from '../../hooks/useAssignments'
-import {
-  useCreateLayer,
-}                                 from '../../hooks/useLayers'
-import { LAYER_CATEGORY_META }    from '../../types'
-import type { LayerCategory }     from '../../types'
+}                                  from '../../hooks/useAssignments'
+import { useCreateLayer }          from '../../hooks/useLayers'
+import { LAYER_CATEGORY_META }     from '../../types'
+import type { LayerCategory }      from '../../types'
+
+// ── Palette ───────────────────────────────────────────────────────────────────
 
 const PALETTE = [
   '#3498DB', '#2ECC71', '#E74C3C', '#F39C12', '#9B59B6',
@@ -19,11 +19,11 @@ const PALETTE = [
 ]
 function randomColor() { return PALETTE[Math.floor(Math.random() * PALETTE.length)] }
 
-// ── Quick create row ──────────────────────────────────────────────────────────
+// ── QuickCreateRow ────────────────────────────────────────────────────────────
 
 interface QuickCreateProps {
   onCreatedAndAssigned: (layerId: string) => void
-  isAssigning: boolean
+  isAssigning:          boolean
 }
 
 function QuickCreateRow({ onCreatedAndAssigned, isAssigning }: QuickCreateProps) {
@@ -46,7 +46,7 @@ function QuickCreateRow({ onCreatedAndAssigned, isAssigning }: QuickCreateProps)
       setExpanded(false)
       onCreatedAndAssigned(newLayer.id)
     } catch {
-      // mutation error shown via createMutation.isError below
+      // error shown via createMutation.isError below
     }
   }
 
@@ -117,17 +117,15 @@ function QuickCreateRow({ onCreatedAndAssigned, isAssigning }: QuickCreateProps)
 }
 
 // ── ZoneAssignWidget ──────────────────────────────────────────────────────────
+//
+// No isOpen / onClose props. Always rendered. The parent Section component
+// (in IFCInspector) controls collapse behaviour via its own chevron toggle.
 
-interface ZoneAssignWidgetProps {
-  isOpen:  boolean
-  onClose: () => void
-}
-
-export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetProps) {
-  const primaryGlobalId   = useSelectionStore(s => s.primaryGlobalId)
-  const selectedGlobalIds = useSelectionStore(s => s.selectedGlobalIds)
+export default function ZoneAssignWidget() {
+  const primaryGlobalId     = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds   = useSelectionStore(s => s.selectedGlobalIds)
   const getObjectByGlobalId = useViewerStore(s => s.getObjectByGlobalId)
-  const zones             = useLayerStore(s => s.layers)
+  const zones               = useLayerStore(s => s.layers)
 
   const assignMutation = useAssignLayer()
   const removeMutation = useRemoveObjectFromLayer()
@@ -139,6 +137,7 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
 
   const assignedZoneIds = new Set(assignments.map(a => a.layerId))
   const selectionCount  = selectedGlobalIds.size
+  const primaryObject   = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
 
   const handleAssign = useCallback((zoneId: string) => {
     const globalIds = Array.from(selectedGlobalIds)
@@ -150,42 +149,39 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
     removeMutation.mutate({ layerId: zoneId, globalId: primaryGlobalId })
   }, [primaryGlobalId, removeMutation])
 
-  // Called when quick-create succeeds — immediately assign the new zone
   const handleCreatedAndAssigned = useCallback((zoneId: string) => {
     const globalIds = Array.from(selectedGlobalIds)
     assignMutation.mutate({ layerId: zoneId, globalIds })
   }, [selectedGlobalIds, assignMutation])
 
-  if (!isOpen) return null
+  // ── Selection context line ────────────────────────────────
+  // Shows what is being assigned — keeps the user oriented
 
-  const primaryObject = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
+  const contextLine = !primaryGlobalId
+    ? null
+    : selectionCount > 1
+      ? `${selectionCount} objects selected`
+      : (primaryObject?.name?.trim() || primaryObject?.type || primaryGlobalId)
 
   return (
     <div className="zone-assign">
 
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <div className="zone-assign__header">
-        <div className="zone-assign__header-info">
-          <span className="zone-assign__header-title">Assign to Zone</span>
-          {primaryGlobalId && (
+      {/* Context: what we're assigning */}
+      {contextLine && (
+        <div className="zone-assign__header">
+          <div className="zone-assign__header-info">
+            <span className="zone-assign__header-title">Zone Assignment</span>
             <span className="zone-assign__header-sub">
-              {primaryObject?.name ?? primaryGlobalId}
+              {contextLine}
               {selectionCount > 1 && (
-                <span className="zone-assign__multi"> +{selectionCount - 1} more</span>
+                <span className="zone-assign__multi"> · {selectionCount} objects</span>
               )}
             </span>
-          )}
+          </div>
         </div>
-        <button
-          className="zone-assign__close"
-          onClick={onClose}
-          aria-label="Close zone assignment"
-        >
-          ✕
-        </button>
-      </div>
+      )}
 
-      {/* ── Quick create ────────────────────────────────────────── */}
+      {/* Quick create */}
       <div className="zone-assign__create-wrap">
         <QuickCreateRow
           onCreatedAndAssigned={handleCreatedAndAssigned}
@@ -193,7 +189,7 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
         />
       </div>
 
-      {/* ── Zone list ───────────────────────────────────────────── */}
+      {/* Zone list */}
       <div className="zone-assign__list">
 
         {loadingAssignments && (
@@ -205,7 +201,7 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
 
         {!loadingAssignments && zones.length === 0 && (
           <div className="zone-assign__empty">
-            No zones yet. Create one above.
+            No zones yet. Use the Zones tab to create one, or create one above.
           </div>
         )}
 
@@ -248,7 +244,7 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
 
         {(assignMutation.isError || removeMutation.isError) && (
           <div className="zone-assign__error">
-            {(assignMutation.error ?? removeMutation.error as Error)?.message}
+            {((assignMutation.error ?? removeMutation.error) as Error)?.message}
           </div>
         )}
 

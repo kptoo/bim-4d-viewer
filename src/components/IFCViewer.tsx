@@ -24,9 +24,9 @@ export default function IFCViewer() {
   const setModelError       = useViewerStore(s => s.setModelError)
   const resetModel          = useViewerStore(s => s.resetModel)
   const setEngineActions    = useViewerStore(s => s.setEngineActions)
+  const setCameraActions    = useViewerStore(s => s.setCameraActions)
   const clearEngineActions  = useViewerStore(s => s.clearEngineActions)
 
-  // Read current action slots so we can detect when they are null
   const zoomToObject    = useViewerStore(s => s.zoomToObject)
   const isolateObjects  = useViewerStore(s => s.isolateObjects)
 
@@ -67,9 +67,6 @@ export default function IFCViewer() {
         console.log('[IFCViewer] onSceneReady — registering engine actions')
         setSceneReady(true)
 
-        // ── Register engine action callbacks into the store ──
-        // Done inside onSceneReady so the engine is fully booted
-        // before any component can call the callbacks.
         setEngineActions(
           (globalId: string) => {
             console.log('[IFCViewer] zoomToObject called — globalId:', globalId)
@@ -79,6 +76,13 @@ export default function IFCViewer() {
             console.log('[IFCViewer] isolateObjects called — count:', globalIds.length)
             engineRef.current?.isolateObjects(globalIds).catch(console.warn)
           }
+        )
+
+        setCameraActions(
+          () => { engineRef.current?.setCameraPerspective().catch(console.warn) },
+          () => { engineRef.current?.setCameraTop().catch(console.warn) },
+          () => { engineRef.current?.setCameraFront().catch(console.warn) },
+          (enabled: boolean) => { engineRef.current?.setWireframe(enabled) }
         )
       },
 
@@ -116,33 +120,18 @@ export default function IFCViewer() {
   }, [])
 
   // ── Guard: re-register engine actions if they were wiped ─
-  //
-  // This is a belt-and-suspenders safety net. The primary fix is in
-  // viewer.store.ts (resetModel no longer nulls the callbacks). However,
-  // if any code path ever nulls zoomToObject / isolateObjects while the
-  // engine is still alive, this effect immediately restores them.
-  //
-  // It fires whenever sceneReady becomes true OR whenever the callbacks
-  // are discovered to be null while the engine is live.
-  //
   useEffect(() => {
     const engine = engineRef.current
     if (!engine || !sceneReady) return
     if (zoomToObject !== null && isolateObjects !== null) return
 
-    console.warn(
-      '[IFCViewer] ⚠ Engine action callbacks are null while engine is alive — restoring.',
-      'zoomToObject:', zoomToObject,
-      'isolateObjects:', isolateObjects,
-    )
+    console.warn('[IFCViewer] ⚠ Engine action callbacks are null while engine is alive — restoring.')
 
     setEngineActions(
       (globalId: string) => {
-        console.log('[IFCViewer] zoomToObject (restored) — globalId:', globalId)
         engineRef.current?.zoomToObject(globalId).catch(console.warn)
       },
       (globalIds: string[]) => {
-        console.log('[IFCViewer] isolateObjects (restored) — count:', globalIds.length)
         engineRef.current?.isolateObjects(globalIds).catch(console.warn)
       }
     )
@@ -264,7 +253,7 @@ export default function IFCViewer() {
     modelLoadState,
   ])
 
-  // ── Effect 3 (Phase 3): Layer filter visibility ──────────
+  // ── Effect 3: Layer filter visibility ───────────────────
   useEffect(() => {
     const engine = engineRef.current
     if (!engine || modelLoadState !== 'loaded' || ifcObjects.length === 0) return
@@ -282,6 +271,62 @@ export default function IFCViewer() {
     ]).catch(console.warn)
 
   }, [activeFilterIds, ifcObjects, modelLoadState])
+
+  // ── Effect 4: Wireframe selection reveal (programmatic path) ──
+  //
+  // ARCHITECTURE — TWO PATHS FOR WIREFRAME SELECTION REVEAL
+  // ─────────────────────────────────────────────────────────
+  //
+  // PATH 1 — 3D click (handled in ViewerEngine.handleClick):
+  //   The raycast result already contains the localId of the clicked element.
+  //   ViewerEngine calls setWireframeSelection() synchronously, before
+  //   onObjectPicked() fires. This bypasses React scheduling entirely.
+  //   No store reads, no async waits, no Effect 4 needed.
+  //
+  // PATH 2 — Programmatic selection (Gantt, Object Tree, this effect):
+  //   Selection originates outside the 3D scene. The engine doesn't know about
+  //   it until the store updates and this effect fires. We call
+  //   engine.updateWireframeSelection(globalIds) which resolves to localIds
+  //   and calls setWireframeSelection internally.
+  //
+  // WHY WE CHECK engine.isWireframeEnabled() INSTEAD OF wireframeActive:
+  //   wireframeActive in viewer.store is the UI state (set by Layout.tsx button).
+  //   engine.isWireframeEnabled() is the engine's actual rendering state.
+  //   These should always agree, but if viewer.store.ts wasn't updated with
+  //   wireframeActive (original codebase doesn't have it), wireframeActive
+  //   would be undefined → always falsy → Effect 4 exits silently every time.
+  //   Checking the engine directly is robust regardless of store version.
+  //
+  // NOTE: For clicks, Path 1 already handled the reveal. This effect running
+  // again is a no-op because updateWireframeSelection() will resolve the same
+  // GlobalIds to the same localIds already revealed by Path 1.
+
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine || modelLoadState !== 'loaded') return
+
+    // Query the engine's actual state — robust against store version mismatches
+    if (!engine.isWireframeEnabled()) return
+
+    const globalIds = Array.from(selectedGlobalIds)
+
+    console.log(
+      '[IFCViewer] Effect 4 — wireframe selection update (programmatic path)',
+      `selectedGlobalIds: [${globalIds.slice(0, 3).join(', ')}${globalIds.length > 3 ? '…' : ''}]`
+    )
+
+    // updateWireframeSelection handles empty array → clear reveal
+    engine.updateWireframeSelection(globalIds).catch(console.warn)
+
+  }, [
+    selectedGlobalIds,
+    primaryGlobalId,
+    modelLoadState,
+    // wireframeActive intentionally omitted — we check engine.isWireframeEnabled()
+    // directly to avoid dependency on store version. The effect still fires on
+    // selection changes regardless of wireframe state; the guard inside
+    // engine.isWireframeEnabled() exits cleanly when wireframe is off.
+  ])
 
   // ── Stats counts ─────────────────────────────────────────
   const frames = computeAllFrames(activities)
@@ -301,12 +346,6 @@ export default function IFCViewer() {
 
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
-      {/*
-        ── Selection Label ──────────────────────────────────────────────────────
-        Always mounted. Manages its own visibility via RAF + direct DOM mutation.
-        Positioned inside the viewer container so it clips to the 3D viewport.
-        Rendered only when a model is loaded (no label over loading/error states).
-      */}
       {modelLoadState === 'loaded' && (
         <SelectionLabel engineRef={engineRef} />
       )}

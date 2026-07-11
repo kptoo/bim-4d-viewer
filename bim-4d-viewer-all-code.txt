@@ -5817,7 +5817,7 @@ function PropertyValue({ prop }: { prop: IFCProperty }) {
   return <span className="insp-val-string">{str}{unit && <span className="insp-val-unit"> {unit}</span>}</span>
 }
 
-// ─── Pset section ────────────────────────────────────────────────────────────
+// ─── Pset section ─────────────────────────────────────────────────────────────
 
 interface PsetSectionProps {
   psetName:   string
@@ -5882,9 +5882,9 @@ function ActivityCard({ activity, status }: { activity: Activity; status: Simula
 
 export default function IFCInspector() {
   // ── Selection state ────────────────────────────────────────
-  const primaryGlobalId        = useSelectionStore(s => s.primaryGlobalId)
-  const selectedGlobalIds      = useSelectionStore(s => s.selectedGlobalIds)
-  const selectedActivityId     = useSelectionStore(s => s.selectedActivityId)
+  const primaryGlobalId    = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds  = useSelectionStore(s => s.selectedGlobalIds)
+  const selectedActivityId = useSelectionStore(s => s.selectedActivityId)
 
   // ── Domain data ───────────────────────────────────────────
   const getObjectByGlobalId    = useViewerStore(s => s.getObjectByGlobalId)
@@ -5896,10 +5896,7 @@ export default function IFCInspector() {
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
 
-  // ── Zone assignment widget state ──────────────────────────
-  const [zoneWidgetOpen, setZoneWidgetOpen] = useState(false)
-
-  // ── Isolation toggle state ─────────────────────────────────
+  // ── Isolation toggle ───────────────────────────────────────
   const [isIsolated, setIsIsolated] = useState(false)
 
   const ifcObject: IFCObject | undefined | null = primaryGlobalId
@@ -5912,7 +5909,7 @@ export default function IFCInspector() {
       ? getActivitiesForObject(ifcObject.globalId)[0]
       : undefined
 
-  // Zones (previously "layers") assigned to this object
+  // Zones assigned to this object — used for the badge count on the section header
   const assignedZones = ifcObject ? getLayersForObject(ifcObject.globalId) : []
 
   const frames = computeAllFrames(activities)
@@ -5920,7 +5917,7 @@ export default function IFCInspector() {
     ? (frames.get(ifcObject.globalId)?.status ?? 'future')
     : 'future'
 
-  // ── Group and sort property sets ──────────────────────────
+  // ── Property sets ─────────────────────────────────────────
   const { psetNames, psetMap } = useMemo(() => {
     if (!ifcObject) return { psetNames: [], psetMap: new Map<string, IFCProperty[]>() }
 
@@ -5951,7 +5948,6 @@ export default function IFCInspector() {
 
   const handleIsolate = useCallback(() => {
     if (!ifcObject || !isolateObjects) return
-
     if (isIsolated) {
       isolateObjects([])
       setIsIsolated(false)
@@ -5963,12 +5959,6 @@ export default function IFCInspector() {
       setIsIsolated(true)
     }
   }, [ifcObject, isolateObjects, isIsolated, selectedGlobalIds])
-
-  // Close zone widget and reset isolation when selection changes
-  const prevGlobalId = primaryGlobalId
-  if (isIsolated && prevGlobalId !== primaryGlobalId) {
-    setIsIsolated(false)
-  }
 
   // ── Empty state ───────────────────────────────────────────
   if (!ifcObject) {
@@ -5998,7 +5988,6 @@ export default function IFCInspector() {
             <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
           </div>
         </div>
-        {/* Multi-selection indicator */}
         {selectedGlobalIds.size > 1 && (
           <div className="insp-multi-badge">
             +{selectedGlobalIds.size - 1} selected
@@ -6007,10 +5996,6 @@ export default function IFCInspector() {
       </div>
 
       {/* ── Quick Actions ─────────────────────────────────────── */}
-      {/*
-        Moved ABOVE property data so it's immediately visible on selection.
-        Primary workflow: select → see actions → act.
-      */}
       <div className="insp-actions">
         <button
           className="action-btn"
@@ -6038,28 +6023,6 @@ export default function IFCInspector() {
           {isIsolated ? '👁 Show All' : '💡 Isolate'}
         </button>
 
-        {/*
-          "Assign Zone" — the primary new action.
-          Opens the ZoneAssignWidget inline below the action bar.
-          The zone-assign button gains an --active state while the widget is open.
-        */}
-        <button
-          className={`action-btn action-btn--zone${zoneWidgetOpen ? ' action-btn--active' : ''}`}
-          onClick={() => setZoneWidgetOpen(v => !v)}
-          title={
-            zoneWidgetOpen
-              ? 'Close zone assignment'
-              : selectedGlobalIds.size > 1
-                ? `Assign ${selectedGlobalIds.size} selected elements to a zone`
-                : 'Assign this element to a zone'
-          }
-        >
-          📐 {zoneWidgetOpen ? 'Close' : 'Assign Zone'}
-          {assignedZones.length > 0 && !zoneWidgetOpen && (
-            <span className="action-btn__badge">{assignedZones.length}</span>
-          )}
-        </button>
-
         <button
           className="action-btn"
           disabled={!linkedActivity}
@@ -6069,30 +6032,24 @@ export default function IFCInspector() {
         </button>
       </div>
 
-      {/* ── Zone Assignment Widget (inline, collapsible) ─────── */}
       {/*
-        Renders directly below the action bar when zoneWidgetOpen = true.
-        Does not navigate away; no tab switch required.
-      */}
-      <ZoneAssignWidget
-        isOpen={zoneWidgetOpen}
-        onClose={() => setZoneWidgetOpen(false)}
-      />
+        ── Zone Assignment ─────────────────────────────────────────────────────
+        Rendered as a permanent Section immediately below the action bar.
+        Always open by default (defaultOpen={true}) — no toggle required.
+        The badge shows the count of currently assigned zones at a glance.
 
-      {/* ── Assigned Zones summary ────────────────────────────── */}
-      {assignedZones.length > 0 && !zoneWidgetOpen && (
-        <div className="insp-zones-summary">
-          <span className="insp-zones-summary__label">Zones</span>
-          <div className="insp-zones-summary__chips">
-            {assignedZones.map(z => (
-              <span key={z.id} className="insp-zone-chip">
-                <span className="insp-zone-chip__dot" style={{ background: z.color }} />
-                {z.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+        This is the Archicad-style workflow:
+          Select object → Inspector shows Zone Assignment → Assign.
+        No tab switching. No scrolling. No hidden panel to discover.
+      */}
+      <Section
+        title="Zone Assignment"
+        defaultOpen={true}
+        badge={assignedZones.length > 0 ? assignedZones.length : undefined}
+        accentColor="var(--accent-blue)"
+      >
+        <ZoneAssignWidget />
+      </Section>
 
       {/* ── Identity Data ─────────────────────────────────────── */}
       <Section title="Identity Data" defaultOpen={false}>
@@ -7912,12 +7869,13 @@ import TimelineSlider            from './TimelineSlider'
 import IFCInspector              from './IFCInspector'
 import IFCObjectTree             from './IFCObjectTree'
 import ZonePanel                 from './zones/ZonePanel'
+import ExistingZonesPanel        from './zones/ExistingZonesPanel'
 import ZoneFilterBar             from './zones/ZoneFilterBar'
 import { useViewerStore }        from '../store/viewer.store'
 import { useLayerStore }         from '../store/layer.store'
 import { IFCUploadService }      from '../services/ifc/IFCUploadService'
 
-type RightTab = 'inspector' | 'tree' | 'zones'
+type RightTab = 'inspector' | 'tree' | 'zones' | 'existing-zones'
 
 export default function Layout() {
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
@@ -7926,7 +7884,6 @@ export default function Layout() {
   const modelFileSize  = useViewerStore(s => s.modelFileSize)
   const resetModel     = useViewerStore(s => s.resetModel)
 
-  // Zone filter count for tab badge
   const activeFilterIds = useLayerStore(s => s.activeFilterIds)
 
   const [rightTab, setRightTab] = useState<RightTab>('inspector')
@@ -7959,7 +7916,6 @@ export default function Layout() {
           <span className="bim-badge">
             {ifcObjects.length} Elements
           </span>
-          {/* Zone filter indicator in header */}
           {activeFilterIds.length > 0 && (
             <span className="bim-badge bim-badge--zone-filter">
               📐 {activeFilterIds.length} zone{activeFilterIds.length !== 1 ? 's' : ''} filtered
@@ -7993,7 +7949,6 @@ export default function Layout() {
           <ErrorBoundary context="3D Viewer">
             <IFCViewer />
           </ErrorBoundary>
-          {/* Zone filter bar replaces layer filter bar — same store, updated copy */}
           <ErrorBoundary context="Zone Filter Bar">
             <ZoneFilterBar />
           </ErrorBoundary>
@@ -8024,35 +7979,47 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Right: Inspector | Object Tree | Zones */}
+        {/* Right: Inspector | Object Tree | Zones | Existing Zones */}
         <div className="panel" style={{ borderRight: 'none' }}>
           <div className="panel-header">
             <div className="panel-tabs">
+
               <button
                 className={`panel-tab${rightTab === 'inspector' ? ' panel-tab--active' : ''}`}
                 onClick={() => setRightTab('inspector')}
               >
                 Inspector
               </button>
+
               <button
                 className={`panel-tab${rightTab === 'tree' ? ' panel-tab--active' : ''}`}
                 onClick={() => setRightTab('tree')}
               >
                 Object Tree
               </button>
-              {/*
-                Renamed from "Layers" → "Zones" throughout.
-                Active filter count badge shows when filters are on.
-              */}
+
               <button
                 className={`panel-tab${rightTab === 'zones' ? ' panel-tab--active' : ''}`}
                 onClick={() => setRightTab('zones')}
               >
                 Zones
+              </button>
+
+              {/*
+                New tab — dedicated to managing, assigning, filtering existing zones.
+                Badge shows active filter count so users know filters are on even
+                when viewing a different tab.
+              */}
+              <button
+                className={`panel-tab${rightTab === 'existing-zones' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('existing-zones')}
+              >
+                Existing Zones
                 {activeFilterIds.length > 0 && (
                   <span className="panel-tab__badge">{activeFilterIds.length}</span>
                 )}
               </button>
+
             </div>
             <div className="panel-header__actions">
               {rightTab === 'inspector' && (
@@ -8073,15 +8040,14 @@ export default function Layout() {
                 <IFCObjectTree />
               </ErrorBoundary>
 
-            ) : (
-              /*
-                Zones tab — replaces the old two-section "Layers + Assign" split.
-                ZonePanel is a single unified surface for zone management.
-                Assignment is handled inline in the Inspector via ZoneAssignWidget,
-                so the Zones tab no longer needs a separate assignment section.
-              */
+            ) : rightTab === 'zones' ? (
               <ErrorBoundary context="Zones Panel">
                 <ZonePanel />
+              </ErrorBoundary>
+
+            ) : (
+              <ErrorBoundary context="Existing Zones Panel">
+                <ExistingZonesPanel />
               </ErrorBoundary>
             )}
 
@@ -8594,23 +8560,328 @@ export default function TimelineSlider() {
 
 
 ====================================================================================================
+FILE: src\components\zones\ExistingZonesPanel.tsx
+====================================================================================================
+
+import { useState, useCallback, useRef } from 'react'
+import { useLayerStore }                  from '../../store/layer.store'
+import { useViewerStore }                 from '../../store/viewer.store'
+import {
+  useLayers,
+  useLayerCounts,
+  useRenameLayer,
+  useDeleteLayer,
+}                                         from '../../hooks/useLayers'
+import { LAYER_CATEGORY_META }            from '../../types'
+import type { InformationLayer }          from '../../types'
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function categoryMeta(category: string) {
+  return (
+    LAYER_CATEGORY_META.find(m => m.value === category) ??
+    { value: category, label: category, icon: '🏷️' }
+  )
+}
+
+// ── ZoneDetailPanel ───────────────────────────────────────────────────────────
+//
+// Shown when the user clicks a zone row.
+// Provides: filter, isolate, rename, delete.
+// No assignment controls here — those live in IFCInspector.
+
+interface ZoneDetailPanelProps {
+  zone:           InformationLayer
+  count:          number
+  isFiltered:     boolean
+  onClose:        () => void
+  onToggleFilter: (id: string) => void
+  onIsolate:      (id: string) => void
+  onDelete:       (id: string) => void
+  onRename:       (id: string, name: string) => void
+}
+
+function ZoneDetailPanel({
+  zone, count, isFiltered,
+  onClose, onToggleFilter, onIsolate, onDelete, onRename,
+}: ZoneDetailPanelProps) {
+  const [editing,  setEditing]  = useState(false)
+  const [editName, setEditName] = useState(zone.name)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const meta = categoryMeta(zone.category)
+
+  const startEdit  = () => {
+    setEditName(zone.name)
+    setEditing(true)
+    setTimeout(() => inputRef.current?.select(), 0)
+  }
+  const commitEdit = () => {
+    const t = editName.trim()
+    if (t && t !== zone.name) onRename(zone.id, t)
+    setEditing(false)
+  }
+  const cancelEdit = () => { setEditName(zone.name); setEditing(false) }
+
+  return (
+    <div className="ezp-detail">
+
+      {/* ── Detail header ──────────────────────────────────── */}
+      <div className="ezp-detail__header">
+        <div className="ezp-detail__swatch" style={{ background: zone.color }} />
+        <div className="ezp-detail__title-col">
+          {editing ? (
+            <input
+              ref={inputRef}
+              className="ezp-detail__rename-input"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              onBlur={commitEdit}
+              onKeyDown={e => {
+                if (e.key === 'Enter')  commitEdit()
+                if (e.key === 'Escape') cancelEdit()
+              }}
+            />
+          ) : (
+            <span className="ezp-detail__name">{zone.name}</span>
+          )}
+          <span className="ezp-detail__meta">
+            {meta.icon} {meta.label} · {count} object{count !== 1 ? 's' : ''}
+          </span>
+        </div>
+        <button className="ezp-detail__close" onClick={onClose} title="Close detail">✕</button>
+      </div>
+
+      {/* ── Actions ────────────────────────────────────────── */}
+      <div className="ezp-detail__actions">
+        <button
+          className={`ezp-detail__action-btn${isFiltered ? ' ezp-detail__action-btn--active' : ''}`}
+          onClick={() => onToggleFilter(zone.id)}
+          title={isFiltered ? 'Remove zone filter' : 'Filter model by this zone'}
+        >
+          <span className="ezp-detail__action-icon">{isFiltered ? '✓' : '🔍'}</span>
+          {isFiltered ? 'Filtered' : 'Filter'}
+        </button>
+
+        <button
+          className="ezp-detail__action-btn"
+          onClick={() => onIsolate(zone.id)}
+          title="Show only elements in this zone"
+        >
+          <span className="ezp-detail__action-icon">◎</span>
+          Isolate
+        </button>
+
+        <button
+          className="ezp-detail__action-btn"
+          onClick={startEdit}
+          title="Rename this zone"
+        >
+          <span className="ezp-detail__action-icon">✎</span>
+          Rename
+        </button>
+
+        <button
+          className="ezp-detail__action-btn ezp-detail__action-btn--danger"
+          onClick={() => onDelete(zone.id)}
+          title="Delete this zone"
+        >
+          <span className="ezp-detail__action-icon">✕</span>
+          Delete
+        </button>
+      </div>
+
+    </div>
+  )
+}
+
+// ── ZoneRow ───────────────────────────────────────────────────────────────────
+
+interface ZoneRowProps {
+  zone:       InformationLayer
+  count:      number
+  isFiltered: boolean
+  isSelected: boolean
+  onClick:    (id: string) => void
+}
+
+function ZoneRow({ zone, count, isFiltered, isSelected, onClick }: ZoneRowProps) {
+  const meta = categoryMeta(zone.category)
+  return (
+    <button
+      className={[
+        'ezp-zone-row',
+        isSelected ? 'ezp-zone-row--selected' : '',
+        isFiltered ? 'ezp-zone-row--filtered' : '',
+      ].filter(Boolean).join(' ')}
+      onClick={() => onClick(zone.id)}
+      title={`${zone.name} · ${count} objects`}
+    >
+      <span className="ezp-zone-row__swatch" style={{ background: zone.color }} />
+      <span className="ezp-zone-row__body">
+        <span className="ezp-zone-row__name">{zone.name}</span>
+        <span className="ezp-zone-row__sub">{meta.icon} {meta.label}</span>
+      </span>
+      <span className="ezp-zone-row__count">{count}</span>
+      {isSelected && <span className="ezp-zone-row__chevron">▾</span>}
+    </button>
+  )
+}
+
+// ── ExistingZonesPanel ────────────────────────────────────────────────────────
+
+export default function ExistingZonesPanel() {
+  const { data: zones, isLoading, isError, error } = useLayers()
+  const { data: counts = new Map<string, number>() } = useLayerCounts()
+
+  const renameMutation = useRenameLayer()
+  const deleteMutation = useDeleteLayer()
+
+  const activeFilterIds = useLayerStore(s => s.activeFilterIds)
+  const toggleFilter    = useLayerStore(s => s.toggleFilter)
+  const clearFilters    = useLayerStore(s => s.clearFilters)
+  const isolateObjects  = useViewerStore(s => s.isolateObjects)
+  const assignments     = useLayerStore(s => s.assignments)
+
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
+
+  const zoneList     = zones ?? []
+  const selectedZone = selectedZoneId ? zoneList.find(z => z.id === selectedZoneId) ?? null : null
+
+  const handleRowClick = useCallback((id: string) => {
+    setSelectedZoneId(prev => prev === id ? null : id)
+  }, [])
+
+  const handleIsolate = useCallback((zoneId: string) => {
+    if (!isolateObjects) return
+    isolateObjects(assignments.filter(a => a.layerId === zoneId).map(a => a.globalId))
+  }, [isolateObjects, assignments])
+
+  const handleRename = useCallback((id: string, newName: string) => {
+    renameMutation.mutate({ id, newName })
+  }, [renameMutation])
+
+  const handleDelete = useCallback((id: string) => {
+    deleteMutation.mutate(id)
+    if (selectedZoneId === id) setSelectedZoneId(null)
+  }, [deleteMutation, selectedZoneId])
+
+  return (
+    <div className="ezp-panel">
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div className="ezp-panel__header">
+        <span className="ezp-panel__title">Existing Zones</span>
+        <div className="ezp-panel__header-right">
+          {zoneList.length > 0 && (
+            <span className="ezp-panel__total">{zoneList.length}</span>
+          )}
+          {activeFilterIds.length > 0 && (
+            <button
+              className="ezp-panel__clear-btn"
+              onClick={clearFilters}
+              title="Clear all filters"
+            >
+              Clear Filters ({activeFilterIds.length})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/*
+        ── Contextual hint ────────────────────────────────────────────────────
+        Replaces the old SelectionSummary + assignment controls.
+        Directs users to Inspector for assignment — one clear sentence is
+        enough; the Inspector tab is always visible in the panel header.
+      */}
+      <div className="ezp-panel__hint">
+        <span className="ezp-panel__hint-icon">💡</span>
+        <span>
+          To assign elements to a zone, select them in the viewer and use the
+          <strong> Inspector → Zone Assignment</strong> section.
+        </span>
+      </div>
+
+      {/* ── Zone list ──────────────────────────────────────── */}
+      <div className="ezp-panel__scroll">
+
+        {isLoading && (
+          <div className="ezp-state">
+            <div className="upload-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
+            <span>Loading zones…</span>
+          </div>
+        )}
+
+        {isError && (
+          <div className="ezp-error">{(error as Error).message}</div>
+        )}
+
+        {!isLoading && !isError && zoneList.length === 0 && (
+          <div className="ezp-empty">
+            <div className="ezp-empty__icon">📋</div>
+            <p className="ezp-empty__title">No zones created yet</p>
+            <p className="ezp-empty__hint">
+              Switch to the <strong>Zones</strong> tab to create your first zone.
+            </p>
+          </div>
+        )}
+
+        {!isLoading && !isError && zoneList.map(zone => (
+          <div key={zone.id}>
+            <ZoneRow
+              zone={zone}
+              count={counts.get(zone.id) ?? 0}
+              isFiltered={activeFilterIds.includes(zone.id)}
+              isSelected={selectedZoneId === zone.id}
+              onClick={handleRowClick}
+            />
+            {selectedZoneId === zone.id && selectedZone && (
+              <ZoneDetailPanel
+                zone={selectedZone}
+                count={counts.get(selectedZone.id) ?? 0}
+                isFiltered={activeFilterIds.includes(selectedZone.id)}
+                onClose={() => setSelectedZoneId(null)}
+                onToggleFilter={toggleFilter}
+                onIsolate={handleIsolate}
+                onDelete={handleDelete}
+                onRename={handleRename}
+              />
+            )}
+          </div>
+        ))}
+
+      </div>
+
+      {/* ── Active filter footer ─────────────────────────────── */}
+      {activeFilterIds.length > 0 && (
+        <div className="ezp-filter-bar">
+          🔍 {activeFilterIds.length} zone filter{activeFilterIds.length !== 1 ? 's' : ''} active
+          <button className="ezp-filter-bar__clear" onClick={clearFilters}>Clear</button>
+        </div>
+      )}
+
+    </div>
+  )
+}
+
+
+====================================================================================================
 FILE: src\components\zones\ZoneAssignWidget.tsx
 ====================================================================================================
 
 import { useState, useCallback } from 'react'
-import { useSelectionStore }      from '../../store/selection.store'
-import { useViewerStore }         from '../../store/viewer.store'
-import { useLayerStore }          from '../../store/layer.store'
+import { useSelectionStore }       from '../../store/selection.store'
+import { useViewerStore }          from '../../store/viewer.store'
+import { useLayerStore }           from '../../store/layer.store'
 import {
   useAssignmentsByGlobalId,
   useAssignLayer,
   useRemoveObjectFromLayer,
-}                                 from '../../hooks/useAssignments'
-import {
-  useCreateLayer,
-}                                 from '../../hooks/useLayers'
-import { LAYER_CATEGORY_META }    from '../../types'
-import type { LayerCategory }     from '../../types'
+}                                  from '../../hooks/useAssignments'
+import { useCreateLayer }          from '../../hooks/useLayers'
+import { LAYER_CATEGORY_META }     from '../../types'
+import type { LayerCategory }      from '../../types'
+
+// ── Palette ───────────────────────────────────────────────────────────────────
 
 const PALETTE = [
   '#3498DB', '#2ECC71', '#E74C3C', '#F39C12', '#9B59B6',
@@ -8618,11 +8889,11 @@ const PALETTE = [
 ]
 function randomColor() { return PALETTE[Math.floor(Math.random() * PALETTE.length)] }
 
-// ── Quick create row ──────────────────────────────────────────────────────────
+// ── QuickCreateRow ────────────────────────────────────────────────────────────
 
 interface QuickCreateProps {
   onCreatedAndAssigned: (layerId: string) => void
-  isAssigning: boolean
+  isAssigning:          boolean
 }
 
 function QuickCreateRow({ onCreatedAndAssigned, isAssigning }: QuickCreateProps) {
@@ -8645,7 +8916,7 @@ function QuickCreateRow({ onCreatedAndAssigned, isAssigning }: QuickCreateProps)
       setExpanded(false)
       onCreatedAndAssigned(newLayer.id)
     } catch {
-      // mutation error shown via createMutation.isError below
+      // error shown via createMutation.isError below
     }
   }
 
@@ -8716,17 +8987,15 @@ function QuickCreateRow({ onCreatedAndAssigned, isAssigning }: QuickCreateProps)
 }
 
 // ── ZoneAssignWidget ──────────────────────────────────────────────────────────
+//
+// No isOpen / onClose props. Always rendered. The parent Section component
+// (in IFCInspector) controls collapse behaviour via its own chevron toggle.
 
-interface ZoneAssignWidgetProps {
-  isOpen:  boolean
-  onClose: () => void
-}
-
-export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetProps) {
-  const primaryGlobalId   = useSelectionStore(s => s.primaryGlobalId)
-  const selectedGlobalIds = useSelectionStore(s => s.selectedGlobalIds)
+export default function ZoneAssignWidget() {
+  const primaryGlobalId     = useSelectionStore(s => s.primaryGlobalId)
+  const selectedGlobalIds   = useSelectionStore(s => s.selectedGlobalIds)
   const getObjectByGlobalId = useViewerStore(s => s.getObjectByGlobalId)
-  const zones             = useLayerStore(s => s.layers)
+  const zones               = useLayerStore(s => s.layers)
 
   const assignMutation = useAssignLayer()
   const removeMutation = useRemoveObjectFromLayer()
@@ -8738,6 +9007,7 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
 
   const assignedZoneIds = new Set(assignments.map(a => a.layerId))
   const selectionCount  = selectedGlobalIds.size
+  const primaryObject   = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
 
   const handleAssign = useCallback((zoneId: string) => {
     const globalIds = Array.from(selectedGlobalIds)
@@ -8749,42 +9019,39 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
     removeMutation.mutate({ layerId: zoneId, globalId: primaryGlobalId })
   }, [primaryGlobalId, removeMutation])
 
-  // Called when quick-create succeeds — immediately assign the new zone
   const handleCreatedAndAssigned = useCallback((zoneId: string) => {
     const globalIds = Array.from(selectedGlobalIds)
     assignMutation.mutate({ layerId: zoneId, globalIds })
   }, [selectedGlobalIds, assignMutation])
 
-  if (!isOpen) return null
+  // ── Selection context line ────────────────────────────────
+  // Shows what is being assigned — keeps the user oriented
 
-  const primaryObject = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
+  const contextLine = !primaryGlobalId
+    ? null
+    : selectionCount > 1
+      ? `${selectionCount} objects selected`
+      : (primaryObject?.name?.trim() || primaryObject?.type || primaryGlobalId)
 
   return (
     <div className="zone-assign">
 
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <div className="zone-assign__header">
-        <div className="zone-assign__header-info">
-          <span className="zone-assign__header-title">Assign to Zone</span>
-          {primaryGlobalId && (
+      {/* Context: what we're assigning */}
+      {contextLine && (
+        <div className="zone-assign__header">
+          <div className="zone-assign__header-info">
+            <span className="zone-assign__header-title">Zone Assignment</span>
             <span className="zone-assign__header-sub">
-              {primaryObject?.name ?? primaryGlobalId}
+              {contextLine}
               {selectionCount > 1 && (
-                <span className="zone-assign__multi"> +{selectionCount - 1} more</span>
+                <span className="zone-assign__multi"> · {selectionCount} objects</span>
               )}
             </span>
-          )}
+          </div>
         </div>
-        <button
-          className="zone-assign__close"
-          onClick={onClose}
-          aria-label="Close zone assignment"
-        >
-          ✕
-        </button>
-      </div>
+      )}
 
-      {/* ── Quick create ────────────────────────────────────────── */}
+      {/* Quick create */}
       <div className="zone-assign__create-wrap">
         <QuickCreateRow
           onCreatedAndAssigned={handleCreatedAndAssigned}
@@ -8792,7 +9059,7 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
         />
       </div>
 
-      {/* ── Zone list ───────────────────────────────────────────── */}
+      {/* Zone list */}
       <div className="zone-assign__list">
 
         {loadingAssignments && (
@@ -8804,7 +9071,7 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
 
         {!loadingAssignments && zones.length === 0 && (
           <div className="zone-assign__empty">
-            No zones yet. Create one above.
+            No zones yet. Use the Zones tab to create one, or create one above.
           </div>
         )}
 
@@ -8847,7 +9114,7 @@ export default function ZoneAssignWidget({ isOpen, onClose }: ZoneAssignWidgetPr
 
         {(assignMutation.isError || removeMutation.isError) && (
           <div className="zone-assign__error">
-            {(assignMutation.error ?? removeMutation.error as Error)?.message}
+            {((assignMutation.error ?? removeMutation.error) as Error)?.message}
           </div>
         )}
 
@@ -8927,34 +9194,23 @@ export default function ZoneFilterBar() {
 FILE: src\components\zones\ZonePanel.tsx
 ====================================================================================================
 
-import { useState, useCallback, useRef } from 'react'
-import { useLayerStore }                  from '../../store/layer.store'
-import { useViewerStore }                 from '../../store/viewer.store'
-import { useSelectionStore }              from '../../store/selection.store'
-import {
-  useLayers,
-  useLayerCounts,
-  useCreateLayer,
-  useRenameLayer,
-  useDeleteLayer,
-}                                         from '../../hooks/useLayers'
-import { useAssignLayer }                 from '../../hooks/useAssignments'
-import { LAYER_CATEGORY_META }            from '../../types'
-import type { LayerCategory, InformationLayer } from '../../types'
+import { useState }           from 'react'
+import { useCreateLayer }     from '../../hooks/useLayers'
+import { LAYER_CATEGORY_META } from '../../types'
+import type { LayerCategory }  from '../../types'
 
-// ── Colour palette for quick picks ───────────────────────────────────────────
+// ── Colour palette ────────────────────────────────────────────────────────────
 
 const PALETTE = [
   '#3498DB', '#2ECC71', '#E74C3C', '#F39C12', '#9B59B6',
   '#1ABC9C', '#E67E22', '#E91E63', '#00BCD4', '#8BC34A',
   '#FF5722', '#607D8B', '#795548', '#9E9E9E', '#CDDC39',
 ]
-
 function randomColor(): string {
   return PALETTE[Math.floor(Math.random() * PALETTE.length)]
 }
 
-// ── Zone category display ─────────────────────────────────────────────────────
+// ── Category helpers ──────────────────────────────────────────────────────────
 
 function categoryMeta(category: string) {
   return (
@@ -8962,8 +9218,6 @@ function categoryMeta(category: string) {
     { value: category, label: category, icon: '🏷️' }
   )
 }
-
-// ── Category-contextual placeholder text ──────────────────────────────────────
 
 const CATEGORY_PLACEHOLDER: Record<string, string> = {
   'building-elements': 'Building element name…',
@@ -8978,499 +9232,108 @@ const CATEGORY_PLACEHOLDER: Record<string, string> = {
   'custom':            'Custom zone name…',
 }
 
-function categoryPlaceholder(category: string): string {
-  return CATEGORY_PLACEHOLDER[category] ?? 'Zone name…'
-}
+// ── ZonePanel ──────────────────────────────────────────────────────────────────
 
-// ── QuickAssignSection ────────────────────────────────────────────────────────
-//
-// Inline assignment UI embedded directly in ZonePanel.
-//
-// Reads the current selection from useSelectionStore (globally accessible —
-// no prop drilling required). Receives zones and counts from ZonePanel so no
-// duplicate React Query subscriptions are created.
-//
-// Uses the existing useAssignLayer() mutation — the same hook used by the
-// Inspector's ZoneAssignWidget — so assignment logic is never duplicated.
+export default function ZonePanel() {
+  const createMutation = useCreateLayer()
 
-interface QuickAssignSectionProps {
-  zones:  InformationLayer[]
-  counts: Map<string, number>
-}
-
-function QuickAssignSection({ zones, counts }: QuickAssignSectionProps) {
-  // ── Selection state ────────────────────────────────────
-  const primaryGlobalId     = useSelectionStore(s => s.primaryGlobalId)
-  const selectedGlobalIds   = useSelectionStore(s => s.selectedGlobalIds)
-  const getObjectByGlobalId = useViewerStore(s => s.getObjectByGlobalId)
-
-  // ── Local UI state ────────────────────────────────────
-  const [selectedZoneId, setSelectedZoneId] = useState<string>('')
-
-  // ── Assignment mutation ───────────────────────────────
-  const assignMutation = useAssignLayer()
-
-  // ── Derived values ────────────────────────────────────
-  const selectionCount = selectedGlobalIds.size
-  const hasSelection   = selectionCount > 0
-  const primaryObject  = primaryGlobalId ? getObjectByGlobalId(primaryGlobalId) : null
-  const hasZones       = zones.length > 0
-
-  // Keep selectedZoneId valid if the zone list changes underneath us
-  const validZoneId = zones.find(z => z.id === selectedZoneId)
-    ? selectedZoneId
-    : (zones[0]?.id ?? '')
-
-  const canAssign = hasSelection && validZoneId.length > 0
-
-  const handleAssign = useCallback(() => {
-    if (!canAssign) return
-    const globalIds = Array.from(selectedGlobalIds)
-    assignMutation.mutate(
-      { layerId: validZoneId, globalIds },
-      {
-        onSuccess: () => {
-          // Reset status after a short delay so the success message is visible
-          setTimeout(() => assignMutation.reset(), 2000)
-        },
-      }
-    )
-  }, [canAssign, selectedGlobalIds, validZoneId, assignMutation])
-
-  // ── Render ────────────────────────────────────────────
-
-  return (
-    <div className="zone-quick-assign">
-
-      {/* Section header */}
-      <div className="zone-quick-assign__title">
-        ASSIGN TO ZONE
-      </div>
-
-      {/* Selection feedback */}
-      <div className="zone-quick-assign__selection">
-        {!hasSelection ? (
-          <p className="zone-quick-assign__no-selection">
-            No IFC object selected.{' '}
-            <span className="zone-quick-assign__no-selection-hint">
-              Select one or more objects in the viewer or tree.
-            </span>
-          </p>
-        ) : selectionCount === 1 && primaryObject ? (
-          <div className="zone-quick-assign__selected-info">
-            <span className="zone-quick-assign__selected-label">Selected object</span>
-            <span className="zone-quick-assign__selected-name" title={primaryObject.globalId}>
-              {primaryObject.name?.trim() || primaryObject.type}
-            </span>
-            <span className="zone-quick-assign__selected-type">{primaryObject.type}</span>
-          </div>
-        ) : (
-          <div className="zone-quick-assign__selected-info">
-            <span className="zone-quick-assign__selected-label">Selected objects</span>
-            <span className="zone-quick-assign__selected-name">
-              {selectionCount} objects selected
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Zone picker + Assign button */}
-      {hasZones ? (
-        <div className="zone-quick-assign__controls">
-          <select
-            className="zone-quick-assign__select"
-            value={validZoneId}
-            onChange={e => {
-              setSelectedZoneId(e.target.value)
-              assignMutation.reset()
-            }}
-            disabled={!hasSelection || assignMutation.isPending}
-            title="Choose a zone"
-          >
-            {zones.map(zone => {
-              const count = counts.get(zone.id) ?? 0
-              return (
-                <option key={zone.id} value={zone.id}>
-                  {zone.name}{count > 0 ? ` (${count})` : ''}
-                </option>
-              )
-            })}
-          </select>
-
-          <button
-            className="zone-quick-assign__btn"
-            onClick={handleAssign}
-            disabled={!canAssign || assignMutation.isPending}
-            title={
-              !hasSelection
-                ? 'Select objects in the viewer first'
-                : !validZoneId
-                ? 'Choose a zone'
-                : `Assign ${selectionCount} object${selectionCount !== 1 ? 's' : ''} to this zone`
-            }
-          >
-            {assignMutation.isPending ? (
-              <>
-                <span className="zone-quick-assign__spinner" />
-                Assigning…
-              </>
-            ) : (
-              'Assign'
-            )}
-          </button>
-        </div>
-      ) : (
-        <p className="zone-quick-assign__no-zones">
-          Create a zone above to start assigning objects.
-        </p>
-      )}
-
-      {/* Success / error feedback */}
-      {assignMutation.isSuccess && (
-        <div className="zone-quick-assign__success">
-          ✓ {Array.from(selectedGlobalIds).length} object
-          {Array.from(selectedGlobalIds).length !== 1 ? 's' : ''} assigned successfully
-        </div>
-      )}
-
-      {assignMutation.isError && (
-        <div className="zone-quick-assign__error">
-          {(assignMutation.error as Error).message}
-        </div>
-      )}
-
-    </div>
-  )
-}
-
-// ── ZoneCard ──────────────────────────────────────────────────────────────────
-
-interface ZoneCardProps {
-  id:          string
-  name:        string
-  color:       string
-  category:    string
-  count:       number
-  isFiltered:  boolean
-  onToggleFilter:   (id: string) => void
-  onShowOnly:       (id: string) => void
-  onDelete:         (id: string) => void
-  onRename:         (id: string, name: string) => void
-}
-
-function ZoneCard({
-  id, name, color, category, count, isFiltered,
-  onToggleFilter, onShowOnly, onDelete, onRename,
-}: ZoneCardProps) {
-  const [editing,  setEditing]  = useState(false)
-  const [editName, setEditName] = useState(name)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  const meta = categoryMeta(category)
-
-  const startEdit = () => {
-    setEditName(name)
-    setEditing(true)
-    setTimeout(() => inputRef.current?.select(), 0)
-  }
-
-  const commitEdit = () => {
-    const trimmed = editName.trim()
-    if (trimmed && trimmed !== name) onRename(id, trimmed)
-    setEditing(false)
-  }
-
-  const cancelEdit = () => { setEditName(name); setEditing(false) }
-
-  return (
-    <div className={`zone-card${isFiltered ? ' zone-card--filtered' : ''}`}>
-
-      <button
-        className="zone-card__swatch"
-        style={{ background: color }}
-        title={isFiltered ? 'Remove from filter' : 'Filter by this zone'}
-        onClick={() => onToggleFilter(id)}
-        aria-pressed={isFiltered}
-      />
-
-      <div className="zone-card__body" onDoubleClick={startEdit}>
-        {editing ? (
-          <input
-            ref={inputRef}
-            className="zone-card__name-input"
-            value={editName}
-            onChange={e => setEditName(e.target.value)}
-            onBlur={commitEdit}
-            onKeyDown={e => {
-              if (e.key === 'Enter')  commitEdit()
-              if (e.key === 'Escape') cancelEdit()
-            }}
-          />
-        ) : (
-          <span className="zone-card__name" title="Double-click to rename">{name}</span>
-        )}
-        <span className="zone-card__category">
-          {meta.icon} {meta.label}
-        </span>
-      </div>
-
-      <span
-        className="zone-card__count"
-        title={`${count} assigned element${count !== 1 ? 's' : ''}`}
-      >
-        {count}
-      </span>
-
-      <div className="zone-card__actions">
-        <button
-          className={`zone-card__action-btn${isFiltered ? ' zone-card__action-btn--active' : ''}`}
-          title={isFiltered ? 'Clear filter' : 'Filter by this zone'}
-          onClick={() => onToggleFilter(id)}
-        >
-          {isFiltered ? '✓ Filtered' : 'Filter'}
-        </button>
-        <button
-          className="zone-card__action-btn zone-card__action-btn--isolate"
-          title="Show only elements in this zone"
-          onClick={() => onShowOnly(id)}
-        >
-          Isolate
-        </button>
-        <button
-          className="zone-card__action-btn zone-card__action-btn--delete"
-          title="Delete zone"
-          onClick={() => onDelete(id)}
-          aria-label={`Delete zone ${name}`}
-        >
-          ✕
-        </button>
-      </div>
-
-    </div>
-  )
-}
-
-// ── CreateZoneForm ─────────────────────────────────────────────────────────────
-
-interface CreateZoneFormProps {
-  category:         LayerCategory
-  onCategoryChange: (category: LayerCategory) => void
-  onSubmit:         (name: string, category: LayerCategory, color: string) => void
-  isLoading:        boolean
-}
-
-function CreateZoneForm({
-  category,
-  onCategoryChange,
-  onSubmit,
-  isLoading,
-}: CreateZoneFormProps) {
-  const [name,  setName]  = useState('')
-  const [color, setColor] = useState(randomColor)
+  const [name,     setName]     = useState('')
+  const [color,    setColor]    = useState(randomColor)
+  const [category, setCategory] = useState<LayerCategory>('zones')
 
   const meta        = categoryMeta(category)
   const heading     = meta.label.toUpperCase()
-  const placeholder = categoryPlaceholder(category)
+  const placeholder = CATEGORY_PLACEHOLDER[category] ?? 'Zone name…'
 
   const handleSubmit = () => {
     const trimmed = name.trim()
     if (!trimmed) return
-    onSubmit(trimmed, category, color)
-    setName('')
-    setColor(randomColor())
+    createMutation.mutate(
+      { payload: { name: trimmed, category, color, description: null } },
+      {
+        onSuccess: () => {
+          setName('')
+          setColor(randomColor())
+          setTimeout(() => createMutation.reset(), 3000)
+        },
+      }
+    )
   }
 
   return (
-    <div className="zone-create-form">
-      <div className="zone-create-form__title">{heading}</div>
+    <div className="zp-create-panel">
 
-      <div className="zone-create-form__row">
-        <input
-          className="zone-create-form__name"
-          type="text"
-          placeholder={placeholder}
-          value={name}
-          onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-          maxLength={80}
-        />
-        <input
-          type="color"
-          className="zone-create-form__color"
-          value={color}
-          onChange={e => setColor(e.target.value)}
-          title="Choose zone color"
-        />
+      {/* ── Panel title ─────────────────────────────────────── */}
+      <div className="zp-create-panel__header">
+        <span className="zp-create-panel__title">Create Zone</span>
       </div>
 
-      <div className="zone-create-form__row">
-        <select
-          className="zone-create-form__category"
-          value={category}
-          onChange={e => onCategoryChange(e.target.value as LayerCategory)}
-        >
-          {LAYER_CATEGORY_META.map(m => (
-            <option key={m.value} value={m.value}>
-              {m.icon} {m.label}
-            </option>
-          ))}
-        </select>
-        <button
-          className="zone-create-form__btn"
-          onClick={handleSubmit}
-          disabled={isLoading || !name.trim()}
-        >
-          {isLoading ? '…' : '＋ Create Zone'}
-        </button>
-      </div>
-    </div>
-  )
-}
+      {/* ── Creation form ────────────────────────────────────── */}
+      <div className="zp-create-panel__body">
 
-// ── ZonePanel ──────────────────────────────────────────────────────────────────
+        <div className="zp-create-panel__section-label">{heading}</div>
 
-export default function ZonePanel() {
-  const { data: zones, isLoading, isError, error } = useLayers()
-  const { data: counts = new Map<string, number>() }  = useLayerCounts()
-
-  const createMutation = useCreateLayer()
-  const renameMutation = useRenameLayer()
-  const deleteMutation = useDeleteLayer()
-
-  const activeFilterIds = useLayerStore(s => s.activeFilterIds)
-  const toggleFilter    = useLayerStore(s => s.toggleFilter)
-  const clearFilters    = useLayerStore(s => s.clearFilters)
-
-  const isolateObjects  = useViewerStore(s => s.isolateObjects)
-  const ifcObjects      = useViewerStore(s => s.ifcObjects)
-  const assignments     = useLayerStore(s => s.assignments)
-
-  const [selectedCategory, setSelectedCategory] = useState<LayerCategory>('zones')
-
-  const handleCreate = useCallback((
-    name: string, category: LayerCategory, color: string,
-  ) => {
-    createMutation.mutate({ payload: { name, category, color, description: null } })
-  }, [createMutation])
-
-  const handleRename = useCallback((id: string, newName: string) => {
-    renameMutation.mutate({ id, newName })
-  }, [renameMutation])
-
-  const handleDelete = useCallback((id: string) => {
-    deleteMutation.mutate(id)
-  }, [deleteMutation])
-
-  const handleShowOnly = useCallback((zoneId: string) => {
-    if (!isolateObjects) return
-    const globalIds = assignments
-      .filter(a => a.layerId === zoneId)
-      .map(a => a.globalId)
-    isolateObjects(globalIds)
-  }, [isolateObjects, assignments])
-
-  const selectedMeta = categoryMeta(selectedCategory)
-  const emptyTitle   = `No ${selectedMeta.label} zones yet`
-  const emptyHint    = `Create your first ${selectedMeta.label} zone above, then select elements in the 3D viewer and assign them using the section below.`
-
-  const zoneList = zones ?? []
-
-  return (
-    <div className="zone-panel">
-
-      {/* ── STICKY: header + create form + assign section ──── */}
-      <div className="zone-panel__sticky">
-
-        <div className="zone-panel__header">
-          <span className="zone-panel__title">Zones</span>
-          {activeFilterIds.length > 0 && (
-            <button
-              className="zone-panel__clear-btn"
-              onClick={clearFilters}
-              title="Clear all zone filters"
-            >
-              Clear Filters ({activeFilterIds.length})
-            </button>
-          )}
+        {/* Name + color row */}
+        <div className="zp-create-panel__row">
+          <input
+            className="zp-create-panel__input"
+            type="text"
+            placeholder={placeholder}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+            maxLength={80}
+          />
+          <input
+            type="color"
+            className="zp-create-panel__color"
+            value={color}
+            onChange={e => setColor(e.target.value)}
+            title="Choose zone color"
+          />
         </div>
 
-        {/* Zone creation */}
-        <CreateZoneForm
-          category={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-          onSubmit={handleCreate}
-          isLoading={createMutation.isPending}
-        />
+        {/* Category selector */}
+        <select
+          className="zp-create-panel__category"
+          value={category}
+          onChange={e => setCategory(e.target.value as LayerCategory)}
+        >
+          {LAYER_CATEGORY_META.map(m => (
+            <option key={m.value} value={m.value}>{m.icon} {m.label}</option>
+          ))}
+        </select>
 
-        {createMutation.isError && (
-          <div className="zone-error">
-            Failed to create zone: {(createMutation.error as Error).message}
+        {/* Submit */}
+        <button
+          className="zp-create-panel__btn"
+          onClick={handleSubmit}
+          disabled={createMutation.isPending || !name.trim()}
+        >
+          {createMutation.isPending ? '…' : '＋ Create Zone'}
+        </button>
+
+        {/* Feedback */}
+        {createMutation.isSuccess && (
+          <div className="zp-create-panel__success">
+            ✓ Zone created. Open <strong>Existing Zones</strong> to assign objects and manage it.
           </div>
         )}
-
-        {/*
-          Assign Selected to Zone.
-          Passes zones + counts already fetched above — no extra queries.
-          Selection is read from the global selection store inside QuickAssignSection.
-        */}
-        <QuickAssignSection zones={zoneList} counts={counts} />
+        {createMutation.isError && (
+          <div className="zp-create-panel__error">
+            {(createMutation.error as Error).message}
+          </div>
+        )}
 
       </div>
 
-      {/* ── SCROLL: zone cards ────────────────────────────────── */}
-      <div className="zone-panel__scroll">
-
-        {isLoading && (
-          <div className="zone-loading">
-            <div className="upload-spinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
-            <span>Loading zones…</span>
-          </div>
-        )}
-
-        {isError && (
-          <div className="zone-error">
-            {(error as Error).message}
-          </div>
-        )}
-
-        {!isLoading && !isError && (
-          <div className="zone-list">
-            {zoneList.length === 0 ? (
-              <div className="zone-empty">
-                <div className="zone-empty__icon">{selectedMeta.icon}</div>
-                <p className="zone-empty__title">{emptyTitle}</p>
-                <p className="zone-empty__hint">{emptyHint}</p>
-              </div>
-            ) : (
-              zoneList.map(zone => (
-                <ZoneCard
-                  key={zone.id}
-                  id={zone.id}
-                  name={zone.name}
-                  color={zone.color}
-                  category={zone.category}
-                  count={counts.get(zone.id) ?? 0}
-                  isFiltered={activeFilterIds.includes(zone.id)}
-                  onToggleFilter={toggleFilter}
-                  onShowOnly={handleShowOnly}
-                  onDelete={handleDelete}
-                  onRename={handleRename}
-                />
-              ))
-            )}
-          </div>
-        )}
-
-        {activeFilterIds.length > 0 && (
-          <div className="zone-filter-indicator">
-            🔍 Filtering by {activeFilterIds.length} zone{activeFilterIds.length !== 1 ? 's' : ''}
-            {' '}·{' '}
-            {ifcObjects.filter(o =>
-              activeFilterIds.every(id => o.layerIds.includes(id))
-            ).length} elements visible
-          </div>
-        )}
-
+      {/* ── Hint ─────────────────────────────────────────────── */}
+      <div className="zp-create-panel__hint">
+        <span className="zp-create-panel__hint-icon">💡</span>
+        <span>
+          After creating a zone, switch to the <strong>Existing Zones</strong> tab
+          to assign selected IFC objects, filter the model, and manage your zones.
+        </span>
       </div>
 
     </div>
@@ -13779,6 +13642,940 @@ FILE: src\styles\zones.css
   font-size:     10px;
   padding:       5px 8px;
 }
+
+/* ============================================================
+   ASSIGN SECTION  (zp-assign-*)
+   Replaces zone-quick-assign-* with an improved design that
+   is more prominent when a selection is active.
+   ============================================================ */
+
+.zp-assign {
+  border-bottom:  1px solid var(--border-color);
+  display:        flex;
+  flex-direction: column;
+  gap:            8px;
+  padding:        10px 14px 12px;
+  transition:     background 0.2s;
+}
+
+/* Active state — selection is present */
+.zp-assign--active {
+  background: rgba(47, 107, 255, 0.04);
+}
+
+/* ── Heading row ──────────────────────────────────────────────  */
+
+.zp-assign__heading {
+  align-items:     center;
+  display:         flex;
+  gap:             8px;
+  justify-content: space-between;
+}
+
+.zp-assign__heading-text {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.zp-assign__heading-badge {
+  background:    rgba(47, 107, 255, 0.15);
+  border:        1px solid rgba(47, 107, 255, 0.3);
+  border-radius: 8px;
+  color:         var(--accent-blue);
+  font-size:     9px;
+  font-weight:   700;
+  padding:       1px 7px;
+  white-space:   nowrap;
+}
+
+/* ── Empty selection state ────────────────────────────────────  */
+
+.zp-assign__empty-selection {
+  align-items: center;
+  display:     flex;
+  gap:         10px;
+  padding:     4px 0;
+}
+
+.zp-assign__empty-icon {
+  color:       var(--text-secondary);
+  flex-shrink: 0;
+  font-size:   20px;
+  opacity:     0.35;
+}
+
+.zp-assign__empty-title {
+  color:       var(--text-primary);
+  font-size:   12px;
+  font-weight: 500;
+  margin:      0 0 2px;
+  opacity:     0.6;
+}
+
+.zp-assign__empty-hint {
+  color:       var(--text-secondary);
+  font-size:   10px;
+  line-height: 1.4;
+  margin:      0;
+}
+
+/* ── Selection card (shown when object is selected) ───────────  */
+
+.zp-assign__selection-card {
+  background:    rgba(47, 107, 255, 0.08);
+  border:        1px solid rgba(47, 107, 255, 0.22);
+  border-left:   3px solid var(--accent-blue);
+  border-radius: 6px;
+  display:       flex;
+  flex-direction: column;
+  gap:           2px;
+  padding:       7px 10px;
+}
+
+.zp-assign__sel-name {
+  color:         var(--text-primary);
+  font-size:     12px;
+  font-weight:   600;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.zp-assign__sel-type {
+  color:     var(--accent-blue);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.zp-assign__sel-guid {
+  color:       var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size:   9px;
+  letter-spacing: 0.03em;
+  margin-top:  1px;
+}
+
+.zp-assign__sel-multi {
+  color:       var(--text-primary);
+  font-size:   12px;
+  font-weight: 600;
+}
+
+/* ── Zone dropdown + Assign button ───────────────────────────  */
+
+.zp-assign__controls {
+  display: flex;
+  gap:     6px;
+}
+
+.zp-assign__select {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  cursor:        pointer;
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  outline:       none;
+  padding:       6px 8px;
+  transition:    border-color 0.15s;
+}
+.zp-assign__select:focus    { border-color: var(--accent-blue); }
+.zp-assign__select:disabled { cursor: default; opacity: 0.5; }
+.zp-assign__select option   { background: var(--bg-panel); color: var(--text-primary); }
+
+.zp-assign--active .zp-assign__select {
+  border-color: rgba(47, 107, 255, 0.4);
+}
+
+.zp-assign__btn {
+  align-items:   center;
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  cursor:        pointer;
+  display:       flex;
+  flex-shrink:   0;
+  font-size:     12px;
+  font-weight:   600;
+  gap:           5px;
+  padding:       6px 16px;
+  transition:    background 0.15s, opacity 0.15s, transform 0.1s;
+  white-space:   nowrap;
+}
+.zp-assign__btn:hover:not(:disabled) {
+  background: #1a5ce8;
+  transform:  translateY(-1px);
+}
+.zp-assign__btn:active:not(:disabled) { transform: translateY(0); }
+.zp-assign__btn:disabled              { cursor: default; opacity: 0.35; }
+
+/* Spinner inside button */
+.zp-assign__spinner {
+  animation:        spin 0.7s linear infinite;
+  border:           2px solid rgba(255, 255, 255, 0.35);
+  border-radius:    50%;
+  border-top-color: #fff;
+  display:          inline-block;
+  flex-shrink:      0;
+  height:           11px;
+  width:            11px;
+}
+
+/* ── Status messages ──────────────────────────────────────────  */
+
+.zp-assign__nudge {
+  background:    rgba(47, 107, 255, 0.08);
+  border:        1px solid rgba(47, 107, 255, 0.2);
+  border-radius: 5px;
+  color:         var(--text-secondary);
+  font-size:     11px;
+  line-height:   1.45;
+  padding:       6px 9px;
+}
+.zp-assign__nudge strong { color: var(--accent-blue); }
+
+.zp-assign__success {
+  background:    rgba(46, 204, 113, 0.1);
+  border:        1px solid rgba(46, 204, 113, 0.25);
+  border-radius: 5px;
+  color:         var(--accent-green);
+  font-size:     11px;
+  font-weight:   500;
+  padding:       5px 8px;
+}
+
+.zp-assign__error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     10px;
+  padding:       5px 8px;
+}
+
+.zp-assign__no-zones {
+  color:     var(--text-secondary);
+  font-size: 11px;
+  margin:    0;
+}
+
+/* ── Section dividers between sticky areas ────────────────────  */
+
+.zone-panel__section-divider {
+  align-items:     center;
+  border-bottom:   1px solid var(--border-color);
+  border-top:      1px solid var(--border-color);
+  color:           var(--text-secondary);
+  display:         flex;
+  font-size:       9px;
+  font-weight:     700;
+  gap:             8px;
+  justify-content: space-between;
+  letter-spacing:  0.1em;
+  padding:         5px 14px;
+  text-transform:  uppercase;
+  background:      rgba(255, 255, 255, 0.02);
+}
+
+.zone-panel__section-divider--list {
+  /* The list divider sits at the top of the scroll area, not the sticky */
+  position: sticky;
+  top:      0;
+  z-index:  1;
+  background: var(--bg-panel, #0d1117);
+}
+
+.zone-panel__zone-count {
+  background:    rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  font-size:     9px;
+  font-weight:   700;
+  padding:       1px 6px;
+}
+
+/* ============================================================
+   ZONE CREATE PANEL  (zp-create-panel-*)
+   Replaces the old ZonePanel's mixed layout.
+   Dedicated to zone creation only — clean, focused form.
+   ============================================================ */
+
+.zp-create-panel {
+  display:        flex;
+  flex-direction: column;
+  height:         100%;
+  overflow:       hidden;
+}
+
+.zp-create-panel__header {
+  align-items:   center;
+  border-bottom: 1px solid var(--border-color);
+  display:       flex;
+  flex-shrink:   0;
+  padding:       10px 14px 8px;
+}
+
+.zp-create-panel__title {
+  color:          var(--text-secondary);
+  font-size:      11px;
+  font-weight:    700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.zp-create-panel__body {
+  display:        flex;
+  flex-direction: column;
+  flex-shrink:    0;
+  gap:            8px;
+  padding:        14px 14px 12px;
+}
+
+.zp-create-panel__section-label {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  margin-bottom:  2px;
+  text-transform: uppercase;
+}
+
+.zp-create-panel__row {
+  display: flex;
+  gap:     6px;
+}
+
+.zp-create-panel__input {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  flex:          1;
+  font-size:     12px;
+  min-width:     0;
+  outline:       none;
+  padding:       7px 10px;
+  transition:    border-color 0.15s;
+}
+.zp-create-panel__input::placeholder { color: var(--text-secondary); opacity: 0.6; }
+.zp-create-panel__input:focus        { border-color: var(--accent-blue); }
+
+.zp-create-panel__color {
+  background:    transparent;
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  cursor:        pointer;
+  flex-shrink:   0;
+  height:        34px;
+  padding:       2px;
+  width:         38px;
+}
+
+.zp-create-panel__category {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  cursor:        pointer;
+  font-size:     12px;
+  outline:       none;
+  padding:       7px 8px;
+  width:         100%;
+}
+.zp-create-panel__category option { background: var(--bg-panel); color: var(--text-primary); }
+
+.zp-create-panel__btn {
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 7px;
+  color:         #fff;
+  cursor:        pointer;
+  font-size:     13px;
+  font-weight:   600;
+  padding:       9px 0;
+  transition:    background 0.15s, opacity 0.15s;
+  width:         100%;
+}
+.zp-create-panel__btn:hover:not(:disabled) { background: #1a5ce8; }
+.zp-create-panel__btn:disabled             { cursor: default; opacity: 0.4; }
+
+.zp-create-panel__success {
+  background:    rgba(46, 204, 113, 0.1);
+  border:        1px solid rgba(46, 204, 113, 0.25);
+  border-radius: 6px;
+  color:         var(--accent-green);
+  font-size:     11px;
+  line-height:   1.5;
+  padding:       7px 10px;
+}
+.zp-create-panel__success strong { color: var(--text-primary); }
+
+.zp-create-panel__error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  padding:       7px 10px;
+}
+
+.zp-create-panel__hint {
+  border-top:     1px solid var(--border-color);
+  color:          var(--text-secondary);
+  display:        flex;
+  font-size:      11px;
+  gap:            8px;
+  line-height:    1.5;
+  margin-top:     auto;
+  padding:        12px 14px;
+}
+.zp-create-panel__hint strong { color: var(--text-primary); }
+.zp-create-panel__hint-icon   { flex-shrink: 0; font-size: 14px; margin-top: 1px; }
+
+/* ============================================================
+   EXISTING ZONES PANEL  (ezp-*)
+   New panel — manages, assigns, filters, and lists zones.
+   ============================================================ */
+
+.ezp-panel {
+  display:        flex;
+  flex-direction: column;
+  height:         100%;
+  overflow:       hidden;
+}
+
+/* ── Panel header ─────────────────────────────────────────────  */
+
+.ezp-panel__header {
+  align-items:     center;
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  flex-shrink:     0;
+  gap:             8px;
+  justify-content: space-between;
+  padding:         10px 14px 8px;
+}
+
+.ezp-panel__title {
+  color:          var(--text-secondary);
+  font-size:      11px;
+  font-weight:    700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ezp-panel__header-right {
+  align-items: center;
+  display:     flex;
+  gap:         8px;
+}
+
+.ezp-panel__total {
+  background:    rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color:         var(--text-secondary);
+  font-size:     10px;
+  font-weight:   700;
+  padding:       1px 7px;
+}
+
+.ezp-panel__clear-btn {
+  background:    rgba(231, 76, 60, 0.12);
+  border:        1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 5px;
+  color:         #e74c3c;
+  cursor:        pointer;
+  font-size:     10px;
+  padding:       2px 8px;
+  transition:    background 0.15s;
+  white-space:   nowrap;
+}
+.ezp-panel__clear-btn:hover { background: rgba(231, 76, 60, 0.22); }
+
+/* ── Selection summary strip ──────────────────────────────────  */
+
+.ezp-selection {
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink:   0;
+  padding:       10px 14px;
+  transition:    background 0.2s;
+}
+
+.ezp-selection--empty {
+  align-items: center;
+  display:     flex;
+  gap:         10px;
+}
+
+.ezp-selection--active {
+  background: rgba(47, 107, 255, 0.05);
+}
+
+.ezp-selection__icon {
+  color:     var(--text-secondary);
+  font-size: 20px;
+  opacity:   0.35;
+}
+
+.ezp-selection__empty-title {
+  color:       var(--text-primary);
+  font-size:   12px;
+  font-weight: 500;
+  margin:      0 0 2px;
+  opacity:     0.6;
+}
+
+.ezp-selection__empty-hint {
+  color:       var(--text-secondary);
+  font-size:   10px;
+  line-height: 1.5;
+  margin:      0;
+}
+
+.ezp-selection__card {
+  background:    rgba(47, 107, 255, 0.08);
+  border:        1px solid rgba(47, 107, 255, 0.2);
+  border-left:   3px solid var(--accent-blue);
+  border-radius: 6px;
+  display:       flex;
+  flex-direction: column;
+  gap:           2px;
+  margin-bottom: 8px;
+  padding:       7px 10px;
+}
+
+.ezp-selection__label {
+  color:          var(--text-secondary);
+  font-size:      9px;
+  font-weight:    700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ezp-selection__name {
+  color:         var(--text-primary);
+  font-size:     12px;
+  font-weight:   600;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.ezp-selection__type {
+  color:       var(--accent-blue);
+  font-size:   10px;
+  font-weight: 500;
+}
+
+.ezp-selection__guid {
+  color:       var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size:   9px;
+  margin-top:  1px;
+}
+
+.ezp-selection__instruction {
+  color:       var(--text-secondary);
+  font-size:   10px;
+  font-style:  italic;
+}
+
+/* ── Scrollable zone list area ────────────────────────────────  */
+
+.ezp-panel__scroll {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  padding:    6px 0;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+.ezp-panel__scroll::-webkit-scrollbar       { width: 4px; }
+.ezp-panel__scroll::-webkit-scrollbar-track  { background: transparent; }
+.ezp-panel__scroll::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Zone row ─────────────────────────────────────────────────  */
+
+.ezp-zone-row {
+  align-items:  center;
+  background:   transparent;
+  border:       none;
+  border-bottom: 1px solid transparent;
+  cursor:       pointer;
+  display:      flex;
+  gap:          10px;
+  padding:      8px 14px;
+  text-align:   left;
+  transition:   background 0.1s;
+  width:        100%;
+}
+.ezp-zone-row:hover { background: rgba(255, 255, 255, 0.04); }
+
+.ezp-zone-row--selected {
+  background:   rgba(47, 107, 255, 0.07);
+  border-color: rgba(47, 107, 255, 0.2);
+}
+
+.ezp-zone-row--filtered {
+  border-left: 3px solid var(--accent-blue);
+  padding-left: 11px;
+}
+
+.ezp-zone-row__swatch {
+  border:        2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        14px;
+  width:         14px;
+}
+
+.ezp-zone-row__body {
+  display:        flex;
+  flex:           1;
+  flex-direction: column;
+  gap:            2px;
+  min-width:      0;
+}
+
+.ezp-zone-row__name {
+  color:         var(--text-primary);
+  font-size:     12px;
+  font-weight:   500;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.ezp-zone-row__sub {
+  color:     var(--text-secondary);
+  font-size: 10px;
+}
+
+.ezp-zone-row__count {
+  background:    rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  color:         var(--text-secondary);
+  flex-shrink:   0;
+  font-size:     10px;
+  font-weight:   600;
+  min-width:     22px;
+  padding:       1px 6px;
+  text-align:    center;
+}
+
+.ezp-zone-row__chevron {
+  color:       var(--accent-blue);
+  flex-shrink: 0;
+  font-size:   11px;
+}
+
+/* ── Zone detail panel (expanded below row) ───────────────────  */
+
+.ezp-detail {
+  background:   rgba(47, 107, 255, 0.04);
+  border-top:   1px solid rgba(47, 107, 255, 0.15);
+  border-bottom: 1px solid rgba(47, 107, 255, 0.15);
+  display:      flex;
+  flex-direction: column;
+  gap:          0;
+  margin-bottom: 2px;
+}
+
+/* ── Detail header ────────────────────────────────────────────  */
+
+.ezp-detail__header {
+  align-items: center;
+  display:     flex;
+  gap:         10px;
+  padding:     10px 14px 8px;
+}
+
+.ezp-detail__swatch {
+  border:        2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  flex-shrink:   0;
+  height:        18px;
+  width:         18px;
+}
+
+.ezp-detail__title-col {
+  display:        flex;
+  flex:           1;
+  flex-direction: column;
+  gap:            2px;
+  min-width:      0;
+}
+
+.ezp-detail__name {
+  color:         var(--text-primary);
+  font-size:     13px;
+  font-weight:   600;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.ezp-detail__rename-input {
+  background:    rgba(255, 255, 255, 0.08);
+  border:        1px solid var(--accent-blue);
+  border-radius: 5px;
+  color:         var(--text-primary);
+  font-size:     13px;
+  font-weight:   600;
+  outline:       none;
+  padding:       3px 7px;
+  width:         100%;
+}
+
+.ezp-detail__meta {
+  color:     var(--text-secondary);
+  font-size: 10px;
+}
+
+.ezp-detail__close {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  flex-shrink: 0;
+  font-size:   12px;
+  line-height: 1;
+  padding:     3px 5px;
+  transition:  color 0.1s;
+}
+.ezp-detail__close:hover { color: var(--text-primary); }
+
+/* ── Assign strip ─────────────────────────────────────────────  */
+
+.ezp-detail__assign {
+  border-top:     1px solid var(--border-color);
+  display:        flex;
+  flex-direction: column;
+  gap:            7px;
+  padding:        10px 14px;
+  transition:     background 0.2s;
+}
+
+.ezp-detail__assign--ready {
+  background: rgba(47, 107, 255, 0.06);
+}
+
+.ezp-detail__assign-hint {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  font-style:  italic;
+}
+
+.ezp-detail__assign-info {
+  display:        flex;
+  flex-direction: column;
+  gap:            2px;
+}
+
+.ezp-detail__assign-obj {
+  color:         var(--text-primary);
+  font-size:     12px;
+  font-weight:   500;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.ezp-detail__assign-type {
+  color:     var(--accent-blue);
+  font-size: 10px;
+}
+
+.ezp-detail__assign-btn {
+  align-items:   center;
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  cursor:        pointer;
+  display:       flex;
+  font-size:     12px;
+  font-weight:   600;
+  gap:           6px;
+  justify-content: center;
+  padding:       7px 0;
+  transition:    background 0.15s, opacity 0.15s, transform 0.1s;
+  width:         100%;
+}
+.ezp-detail__assign-btn:hover:not(:disabled) {
+  background: #1a5ce8;
+  transform:  translateY(-1px);
+}
+.ezp-detail__assign-btn:active:not(:disabled) { transform: none; }
+.ezp-detail__assign-btn:disabled { cursor: default; opacity: 0.35; }
+
+.ezp-detail__assign-success {
+  background:    rgba(46, 204, 113, 0.1);
+  border:        1px solid rgba(46, 204, 113, 0.25);
+  border-radius: 5px;
+  color:         var(--accent-green);
+  font-size:     11px;
+  padding:       5px 8px;
+  text-align:    center;
+}
+
+.ezp-detail__assign-error {
+  color:     #e74c3c;
+  font-size: 10px;
+}
+
+/* ── Action row (Filter / Isolate / Rename / Delete) ──────────  */
+
+.ezp-detail__actions {
+  border-top:  1px solid var(--border-color);
+  display:     flex;
+  flex-wrap:   wrap;
+  gap:         4px;
+  padding:     8px 14px 10px;
+}
+
+.ezp-detail__action-btn {
+  align-items:   center;
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid transparent;
+  border-radius: 5px;
+  color:         var(--text-secondary);
+  cursor:        pointer;
+  display:       flex;
+  font-size:     11px;
+  gap:           5px;
+  padding:       4px 10px;
+  transition:    all 0.12s;
+  white-space:   nowrap;
+}
+.ezp-detail__action-btn:hover {
+  background:   rgba(255, 255, 255, 0.10);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+.ezp-detail__action-btn--active {
+  background:   rgba(47, 107, 255, 0.15);
+  border-color: var(--accent-blue);
+  color:        var(--accent-blue);
+}
+.ezp-detail__action-btn--danger:hover {
+  background:   rgba(231, 76, 60, 0.15);
+  border-color: #e74c3c;
+  color:        #e74c3c;
+}
+
+.ezp-detail__action-icon {
+  font-size:  11px;
+  line-height: 1;
+}
+
+/* ── State / empty ────────────────────────────────────────────  */
+
+.ezp-state {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   12px;
+  gap:         8px;
+  padding:     16px 14px;
+}
+
+.ezp-error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+}
+
+.ezp-empty {
+  padding:    36px 20px;
+  text-align: center;
+}
+.ezp-empty__icon  { font-size: 28px; margin-bottom: 10px; }
+.ezp-empty__title {
+  color:         var(--text-primary);
+  font-size:     13px;
+  font-weight:   600;
+  margin-bottom: 6px;
+}
+.ezp-empty__hint {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  line-height: 1.5;
+}
+.ezp-empty__hint strong { color: var(--text-primary); }
+
+/* ── Active filter footer ─────────────────────────────────────  */
+
+.ezp-filter-bar {
+  align-items:   center;
+  background:    rgba(47, 107, 255, 0.06);
+  border-top:    1px solid rgba(47, 107, 255, 0.2);
+  color:         var(--accent-blue);
+  display:       flex;
+  flex-shrink:   0;
+  font-size:     11px;
+  gap:           8px;
+  justify-content: space-between;
+  padding:       6px 14px;
+}
+
+.ezp-filter-bar__clear {
+  background:    transparent;
+  border:        1px solid rgba(47, 107, 255, 0.3);
+  border-radius: 4px;
+  color:         var(--accent-blue);
+  cursor:        pointer;
+  font-size:     10px;
+  padding:       2px 8px;
+  transition:    all 0.12s;
+  white-space:   nowrap;
+}
+.ezp-filter-bar__clear:hover {
+  background: rgba(47, 107, 255, 0.12);
+}
+
+/* ── Shared spinner (reused in assign button) ─────────────────  */
+
+.ezp-spinner {
+  animation:        spin 0.7s linear infinite;
+  border:           2px solid rgba(255, 255, 255, 0.3);
+  border-radius:    50%;
+  border-top-color: #fff;
+  display:          inline-block;
+  flex-shrink:      0;
+  height:           11px;
+  width:            11px;
+}
+
+/* ── ExistingZonesPanel hint strip ───────────────────────────
+   Replaces the SelectionSummary / assignment controls block.
+   Directs users to Inspector for zone assignment.             */
+
+.ezp-panel__hint {
+  align-items:   flex-start;
+  border-bottom: 1px solid var(--border-color);
+  color:         var(--text-secondary);
+  display:       flex;
+  flex-shrink:   0;
+  font-size:     11px;
+  gap:           8px;
+  line-height:   1.5;
+  padding:       9px 14px;
+}
+.ezp-panel__hint strong { color: var(--text-primary); }
+.ezp-panel__hint-icon   { flex-shrink: 0; font-size: 13px; margin-top: 1px; }
 
 
 ====================================================================================================

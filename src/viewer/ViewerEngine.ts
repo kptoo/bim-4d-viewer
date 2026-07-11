@@ -18,32 +18,32 @@ interface RaycastResult {
 }
 
 // ── Augmented FragmentsModel interface ───────────────────────────────────────
-// Only declares the methods we actually call. All are verified against
-// @thatopen/fragments@3.4.6 dist/index.d.ts.
+// Verified against @thatopen/fragments@3.4.6 dist/index.d.ts
 
 interface FragmentsModelInternal {
-  // ID resolution
   getLocalIds():                       Promise<number[]>
   getGuidsByLocalIds(ids: number[]):   Promise<(string | null)[]>
   getLocalIdsByGuids(guids: string[]): Promise<(number | null)[]>
-
-  // Bounding box — CORRECT API for zoom (no mesh walking)
-  getMergedBox(localIds: number[]): Promise<THREE.Box3>
-
-  // Visibility — CORRECT method name is setVisible (not setVisibility)
+  getMergedBox(localIds: number[]):    Promise<THREE.Box3>
   setVisible(localIds: number[] | undefined, visible: boolean): Promise<void>
   resetVisible(): Promise<void>
 
-  // Raycast
+  // Per-item opacity — operates on GPU buffers within batched geometry,
+  // completely independent of mesh.visible, setVisible(), and setColor().
+  // undefined → all items. Verified in @thatopen/fragments@3.4.6 dist/index.d.ts line 1865.
+  setOpacity(localIds: number[] | undefined, opacity: number): Promise<void>
+  resetOpacity(localIds: number[] | undefined): Promise<void>
+
   raycast(params: {
     camera: THREE.PerspectiveCamera | THREE.OrthographicCamera
     mouse:  THREE.Vector2
     dom:    HTMLCanvasElement
   }): Promise<RaycastResult | null>
 
-  // Tiles map — DataMap<string|number, THREE.Mesh>
-  // Used only for debug inspection if needed
-  tiles: Map<string | number, THREE.Mesh>
+  tiles: {
+    onItemSet:      { add: (cb: (e: { key: string | number; value: THREE.Mesh }) => void) => void }
+    onBeforeDelete: { add: (cb: (e: { key: string | number; value: THREE.Mesh }) => void) => void }
+  }
 }
 
 export class ViewerEngine {
@@ -61,9 +61,74 @@ export class ViewerEngine {
   private readonly config: ViewerEngineConfig
   private isDisposed = false
   private ro?: ResizeObserver
-
-  // Tracks isolation state so restoreVisibility() knows whether a reset is needed
   private isIsolated = false
+
+  // ── Wireframe state ───────────────────────────────────────
+  //
+  // WHY material.wireframe = true IS BANNED
+  // ────────────────────────────────────────
+  // That Open Engine v3.4.6 deletes geometry CPU arrays after the first GPU
+  // upload. Three.js wireframe rendering reads geometry.index.array to build
+  // line pairs — it crashes with "Cannot read 'length' of undefined" after
+  // the first frame. LODMesh tiles use ShaderMaterial with no wireframe path.
+  //
+  // WHY mesh.visible = false IS WRONG FOR PER-ITEM CONTROL
+  // ────────────────────────────────────────────────────────
+  // Tiles are BATCHED. One THREE.Mesh tile contains many IFC items packed into
+  // a single BufferGeometry. Per-item visibility, colour, and opacity are
+  // controlled via GPU buffers managed by the engine's HighlightManager —
+  // NOT by Three.js mesh.visible.
+  //
+  // When mesh.visible = false, Three.js skips the mesh entirely — the GPU
+  // shader never runs. All per-item setOpacity/setColor/setVisible state
+  // inside that mesh becomes unreachable. There is no way to show one item
+  // from a hidden mesh.
+  //
+  // Furthermore, userData.itemIds on tiles is a Set of raw byte values from a
+  // packed 4-byte per-vertex ID buffer, NOT a Set of IFC localIds. Comparing
+  // localId 219 against this Set will never produce a match.
+  //
+  // CORRECT ARCHITECTURE — model.setOpacity()
+  // ───────────────────────────────────────────
+  // setOpacity(localIds, opacity) is the engine's own per-item opacity API.
+  // It calls model.traverse(items, ...) and model.tiles.updateVirtualMeshes()
+  // — a worker operation that writes opacity data for specific items within
+  // shared batched geometry, completely independent of mesh.visible,
+  // setVisible(), and setColor().
+  //
+  // WIREFRAME ON:
+  //   • ALL tile meshes stay visible = true (shaders keep running)
+  //   • model.setOpacity(undefined, 0) → all items become transparent (GPU-level)
+  //   • LineSegments (EdgeGeometry) become visible → edges appear on dark bg
+  //
+  // SELECTION IN WIREFRAME:
+  //   • model.resetOpacity(selectedLocalIds) → selected items restore full opacity
+  //   • ColorManager.setColor() already applies #FF8C00 highlight (Effect 2 in IFCViewer)
+  //   • Result: selected element appears as solid shaded highlighted mesh
+  //
+  // WIREFRAME OFF:
+  //   • model.resetOpacity(undefined) → all items restore original opacity
+  //   • LineSegments become hidden
+  //
+  // This approach never touches mesh.visible, never conflicts with setVisible()
+  // (Zone/Isolate), never conflicts with setColor() (selection/simulation).
+
+  private wireframeEnabled = false
+
+  // tileKey → LineSegments: built once at tile-arrival, cached permanently.
+  // mesh.visible is NEVER touched — tiles always remain visible=true.
+  private wireframeLines = new Map<string | number, THREE.LineSegments>()
+
+  // Tracks which localIds are currently opacity-restored (= "revealed" as shaded)
+  // so we can re-hide them when selection changes.
+  private revealedLocalIds = new Set<number>()
+
+  // Shared LineBasicMaterial for all edge overlays — white on dark background.
+  private readonly wireframeMaterial = new THREE.LineBasicMaterial({
+    color:      0xFFFFFF,
+    depthTest:  true,
+    depthWrite: false,
+  })
 
   constructor(config: ViewerEngineConfig) {
     this.config       = config
@@ -138,6 +203,7 @@ export class ViewerEngine {
           this.fragmentsManager.core.update(true)
         }
         this.loadedModels.push(model)
+        this.hookModelTiles(model)
       })
 
       this.ifcLoader = this.components.get(OBC.IfcLoader)
@@ -187,10 +253,247 @@ export class ViewerEngine {
     } catch { /* non-critical */ }
   }
 
+  // ── Wireframe: per-tile edge pre-building ─────────────────
+  //
+  // Registers two hooks on model.tiles:
+  //   onItemSet      → builds EdgesGeometry + LineSegments while CPU arrays live
+  //   onBeforeDelete → disposes the corresponding LineSegments
+  //
+  // IMPORTANT: mesh.visible is NEVER set here. Tile meshes always stay visible=true.
+  // Wireframe "hiding" is achieved via model.setOpacity(undefined, 0), not mesh visibility.
+
+  private hookModelTiles(model: FRAGS.FragmentsModel): void {
+    const internal = model as unknown as FragmentsModelInternal
+
+    internal.tiles.onItemSet.add(({ key, value: mesh }) => {
+      this.buildTileEdges(key, mesh)
+    })
+
+    internal.tiles.onBeforeDelete.add(({ key }) => {
+      this.disposeTileEdges(key)
+    })
+  }
+
+  // ── Wireframe: build edges for one SHELL tile ─────────────
+  //
+  // Called synchronously inside tiles.onItemSet, before the first render frame.
+  // At this point geometry.index.array and position.array are still live CPU TypedArrays.
+  //
+  // SHELL tiles: THREE.Mesh + non-instanced THREE.BufferGeometry + geometry.index
+  // LOD tiles:   LODMesh + LODGeometry (InstancedBufferGeometry) → skipped
+  //
+  // The resulting LineSegments are added to the scene as siblings of model.object
+  // and hidden by default. They are never affected by model.setOpacity() calls.
+
+  private buildTileEdges(key: string | number, mesh: THREE.Mesh): void {
+    try {
+      const geo = mesh.geometry
+
+      // Skip LOD/LINE tiles — LODGeometry is InstancedBufferGeometry
+      if ((geo as THREE.InstancedBufferGeometry).isInstancedBufferGeometry) {
+        return
+      }
+
+      if (!geo.index || !geo.index.array) {
+        return
+      }
+
+      // Build EdgesGeometry from CPU arrays while they are still alive.
+      // EdgesGeometry produces its own Float32 position buffer that is never deleted.
+      const edges    = new THREE.EdgesGeometry(geo)
+      const segments = new THREE.LineSegments(edges, this.wireframeMaterial)
+
+      // Match tile transform.
+      segments.matrix.copy(mesh.matrix)
+      segments.matrixAutoUpdate = false
+
+      // Hidden by default; shown when wireframe is activated.
+      segments.visible = this.wireframeEnabled
+
+      // Add as a sibling of model.object so LineSegments are unaffected by
+      // model.setOpacity() calls and always render independently.
+      this.world.scene.three.add(segments)
+      this.wireframeLines.set(key, segments)
+
+    } catch (err) {
+      console.warn('[ViewerEngine] wireframe: buildTileEdges failed for tile', key, err)
+    }
+  }
+
+  // ── Wireframe: dispose edges for one tile ─────────────────
+
+  private disposeTileEdges(key: string | number): void {
+    const segments = this.wireframeLines.get(key)
+    if (segments) {
+      try {
+        this.world.scene.three.remove(segments)
+        segments.geometry.dispose()
+      } catch { /* suppress */ }
+      this.wireframeLines.delete(key)
+    }
+  }
+
+  // ── Wireframe toggle (public API) ─────────────────────────
+  //
+  // ON:
+  //   • Show all edge LineSegments
+  //   • Call model.setOpacity(undefined, 0) → all items transparent (GPU-level)
+  //   • mesh.visible stays true — shaders keep running
+  //
+  // OFF:
+  //   • Hide all edge LineSegments
+  //   • Call model.resetOpacity(undefined) → all items restore original opacity
+  //   • Clear revealedLocalIds
+
+  setWireframe(enabled: boolean): void {
+    if (this.wireframeEnabled === enabled) return
+    this.wireframeEnabled = enabled
+
+    // Toggle edge overlays
+    for (const segments of this.wireframeLines.values()) {
+      segments.visible = enabled
+    }
+
+    // Apply / remove opacity mask on all items across all models
+    for (const model of this.loadedModels) {
+      const internal = model as unknown as FragmentsModelInternal
+      if (enabled) {
+        // Make all items transparent — they become invisible at GPU level
+        // while the tile mesh stays visible so shaders can still run per-item
+        internal.setOpacity(undefined, 0).catch(err =>
+          console.warn('[ViewerEngine] setWireframe: setOpacity failed', err)
+        )
+      } else {
+        // Restore all items to their original opacity
+        internal.resetOpacity(undefined).catch(err =>
+          console.warn('[ViewerEngine] setWireframe: resetOpacity failed', err)
+        )
+      }
+    }
+
+    // Clear revealed set on any mode change
+    this.revealedLocalIds.clear()
+
+    console.log(
+      `[ViewerEngine] setWireframe — ${enabled ? 'ON (edges only)' : 'OFF (shaded)'},`,
+      `models: ${this.loadedModels.length}, edge overlays: ${this.wireframeLines.size}`
+    )
+  }
+
+  // ── Wireframe selection reveal — called from handleClick (primary path) ──
+  //
+  // Applies opacity reveal to a set of localIds within the engine's own GPU
+  // buffer system. Called synchronously from handleClick before onObjectPicked,
+  // where the localId is already available from the raycast result.
+  //
+  // Steps:
+  //   1. Re-hide previously revealed localIds (set opacity back to 0)
+  //   2. Reveal newly selected localIds (resetOpacity restores original)
+  //   3. Update revealedLocalIds tracking set
+  //
+  // ColorManager.setColor() (Effect 2 in IFCViewer) applies #FF8C00 highlight
+  // independently — it operates on the same items but different GPU buffer.
+  //
+  // Does NOT affect:
+  //   • setVisible/resetVisible (Zone/Isolate — different GPU buffer)
+  //   • LineSegments visibility
+  //   • mesh.visible (never touched)
+
+  private applyWireframeReveal(nextLocalIds: Set<number>): void {
+    if (!this.wireframeEnabled) return
+
+    for (const model of this.loadedModels) {
+      const internal = model as unknown as FragmentsModelInternal
+
+      // Step 1: re-hide the previously revealed items (if any changed)
+      const toHide = [...this.revealedLocalIds].filter(id => !nextLocalIds.has(id))
+      if (toHide.length > 0) {
+        console.log(`[ViewerEngine] Hiding previous mesh — localIds: [${toHide.join(', ')}]`)
+        internal.setOpacity(toHide, 0).catch(err =>
+          console.warn('[ViewerEngine] applyWireframeReveal: re-hide failed', err)
+        )
+      }
+
+      // Step 2: reveal the newly selected items
+      if (nextLocalIds.size > 0) {
+        const toReveal = Array.from(nextLocalIds)
+        console.log(`[ViewerEngine] Showing shaded mesh — localIds: [${toReveal.join(', ')}]`)
+        // resetOpacity restores original opacity for these specific items
+        internal.resetOpacity(toReveal).catch(err =>
+          console.warn('[ViewerEngine] applyWireframeReveal: reveal failed', err)
+        )
+      }
+    }
+
+    // Step 3: update tracking
+    this.revealedLocalIds = new Set(nextLocalIds)
+    console.log(
+      `[ViewerEngine] Renderer invalidated — revealed localIds: ${nextLocalIds.size},`,
+      `wireframeEnabled: ${this.wireframeEnabled}`
+    )
+  }
+
+  // ── Wireframe selection reveal — public API for programmatic selection ────
+  //
+  // Called by IFCViewer Effect 4 for selection changes from Gantt, Object Tree,
+  // or any source other than a direct 3D click.
+  //
+  // Resolves GlobalIds → localIds (async), then delegates to applyWireframeReveal().
+
+  async updateWireframeSelection(globalIds: string[]): Promise<void> {
+    console.log(
+      '[ViewerEngine] updateWireframeSelection —',
+      `wireframeEnabled: ${this.wireframeEnabled},`,
+      `globalIds: [${globalIds.slice(0, 3).join(', ')}${globalIds.length > 3 ? '…' : ''}]`
+    )
+
+    if (!this.wireframeEnabled) {
+      console.log('[ViewerEngine] updateWireframeSelection: wireframe OFF — no-op')
+      return
+    }
+
+    if (globalIds.length === 0) {
+      console.log('[ViewerEngine] updateWireframeSelection: empty — clearing reveal')
+      this.applyWireframeReveal(new Set())
+      return
+    }
+
+    const allLocalIds = new Set<number>()
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+        try {
+          const resolved = await internal.getLocalIdsByGuids(globalIds)
+          for (const id of resolved) {
+            if (id !== null && id !== undefined) allLocalIds.add(id)
+          }
+        } catch (err) {
+          console.warn('[ViewerEngine] updateWireframeSelection: resolution failed', err)
+        }
+      })
+    )
+
+    console.log(
+      '[ViewerEngine] updateWireframeSelection — resolved',
+      allLocalIds.size, 'localIds, applying reveal'
+    )
+    this.applyWireframeReveal(allLocalIds)
+  }
+
+  // ── Public getter for IFCViewer Effect 4 ──────────────────
+  isWireframeEnabled(): boolean { return this.wireframeEnabled }
+
   // ── Unload ────────────────────────────────────────────────
 
   async unloadAll(): Promise<void> {
-    this.isIsolated = false
+    this.isIsolated       = false
+    this.wireframeEnabled = false
+    this.revealedLocalIds.clear()
+
+    for (const key of this.wireframeLines.keys()) {
+      this.disposeTileEdges(key)
+    }
+    this.wireframeLines.clear()
 
     if (this.loadedModels.length === 0) return
 
@@ -209,17 +512,6 @@ export class ViewerEngine {
 
   // ── Phase 3+: Zoom to object ──────────────────────────────
 
-  /**
-   * Fits the camera to the bounding box of a single IFC object.
-   *
-   * Uses model.getMergedBox(localIds) — the correct v3.4.6 API.
-   * This is resolved by the worker thread from actual geometry data,
-   * so no mesh traversal is required and LOD tiles are handled correctly.
-   *
-   * Previous broken approach: walking model.object children looking for
-   * mesh.userData.expressID — that key does NOT exist in v3.4.6.
-   * Tiles set userData.sampleId / userData.tileId / userData.itemIds (Set<number>).
-   */
   async zoomToObject(globalId: string): Promise<void> {
     console.log('[ViewerEngine] zoomToObject — GlobalId:', globalId)
 
@@ -235,7 +527,6 @@ export class ViewerEngine {
     for (const model of this.loadedModels) {
       const internal = model as unknown as FragmentsModelInternal
 
-      // Step 1: GlobalId → localId
       let localIds: (number | null)[] = []
       try {
         localIds = await internal.getLocalIdsByGuids([globalId])
@@ -245,32 +536,23 @@ export class ViewerEngine {
       }
 
       const localId = localIds[0]
-      console.log('[ViewerEngine] zoomToObject — localId:', localId)
-
       if (localId === null || localId === undefined) {
         console.warn('[ViewerEngine] zoomToObject: GlobalId not found in model')
         continue
       }
 
-      // Step 2: Get the bounding box directly from the engine (correct API)
-      // getMergedBox is resolved by the worker from actual geometry — no mesh walking
       let box: THREE.Box3
       try {
         box = await internal.getMergedBox([localId])
-        console.log('[ViewerEngine] zoomToObject — bbox:', box.min, box.max, 'isEmpty:', box.isEmpty())
-      } catch (err) {
-        console.warn('[ViewerEngine] zoomToObject: getMergedBox failed', err)
-        // Fallback: fit to whole model
+      } catch {
         box = new THREE.Box3().setFromObject(model.object)
-        console.log('[ViewerEngine] zoomToObject — fallback to model bbox:', box.isEmpty())
       }
 
       if (box.isEmpty()) {
-        console.warn('[ViewerEngine] zoomToObject: bounding box is empty — skipping camera move')
+        console.warn('[ViewerEngine] zoomToObject: bounding box is empty')
         return
       }
 
-      // Step 3: Move camera
       try {
         await this.world.camera.controls.fitToBox(box, true, {
           paddingLeft:   0.5,
@@ -278,41 +560,23 @@ export class ViewerEngine {
           paddingTop:    0.5,
           paddingBottom: 0.5,
         })
-        console.log('[ViewerEngine] zoomToObject — camera move complete')
       } catch (err) {
         console.warn('[ViewerEngine] zoomToObject: fitToBox failed', err)
       }
 
-      return // first model that contains the object wins
+      return
     }
   }
 
   // ── Phase 3+: Isolate objects ─────────────────────────────
 
-  /**
-   * Isolates a set of IFC objects by hiding everything else.
-   * Passing an empty array restores full visibility.
-   *
-   * Uses model.setVisible(localIds, visible): Promise<void>
-   * which is the correct v3.4.6 API.
-   *
-   * Previous broken approach used setVisibility() — that method does
-   * not exist on FragmentsModel in any version of @thatopen/fragments.
-   */
   async isolateObjects(globalIds: string[]): Promise<void> {
     console.log('[ViewerEngine] isolateObjects —', globalIds.length, 'GlobalIds')
 
-    if (!this.fragmentsManager?.initialized) {
-      console.warn('[ViewerEngine] isolateObjects: FragmentsManager not initialized')
-      return
-    }
-    if (this.loadedModels.length === 0) {
-      console.warn('[ViewerEngine] isolateObjects: no models loaded')
-      return
-    }
+    if (!this.fragmentsManager?.initialized) return
+    if (this.loadedModels.length === 0) return
 
     if (globalIds.length === 0) {
-      console.log('[ViewerEngine] isolateObjects: empty — restoring visibility')
       await this.restoreVisibility()
       return
     }
@@ -322,98 +586,66 @@ export class ViewerEngine {
     await Promise.all(
       this.loadedModels.map(async (model) => {
         const internal = model as unknown as FragmentsModelInternal
-
-        // Step 1: resolve target GlobalIds → localIds
         let targetLocalIds: (number | null)[] = []
         try {
           targetLocalIds = await internal.getLocalIdsByGuids(globalIds)
-        } catch (err) {
-          console.warn('[ViewerEngine] isolateObjects: getLocalIdsByGuids failed', err)
-          return
-        }
+        } catch { return }
 
         const targetSet = new Set<number>(
           targetLocalIds.filter((id): id is number => id !== null && id !== undefined)
         )
-        console.log('[ViewerEngine] isolateObjects — target localIds:', targetSet.size)
+        if (targetSet.size === 0) return
 
-        if (targetSet.size === 0) {
-          console.warn('[ViewerEngine] isolateObjects: no localIds resolved')
-          return
-        }
-
-        // Step 2: hide everything, then show only targets
-        // setVisible(undefined, false) hides ALL items
-        // setVisible(targetArray, true) shows only the targets
         try {
           await internal.setVisible(undefined, false)
-          console.log('[ViewerEngine] isolateObjects — hid all items')
-
           await internal.setVisible(Array.from(targetSet), true)
-          console.log('[ViewerEngine] isolateObjects — showed', targetSet.size, 'items')
         } catch (err) {
           console.warn('[ViewerEngine] isolateObjects: setVisible failed', err)
         }
       })
     )
-
-    console.log('[ViewerEngine] isolateObjects — complete')
   }
 
   // ── Phase 3: Layer-filter visibility ─────────────────────
-  // These methods use setVisible/resetVisible (correct API).
 
   async hideObjects(globalIds: string[]): Promise<void> {
     if (globalIds.length === 0 || !this.fragmentsManager?.initialized) return
-
     await Promise.all(
       this.loadedModels.map(async (model) => {
         const internal = model as unknown as FragmentsModelInternal
         try {
           const localIds = await internal.getLocalIdsByGuids(globalIds)
           const valid    = localIds.filter((id): id is number => id !== null && id !== undefined)
-          if (valid.length === 0) return
-          await internal.setVisible(valid, false)
-        } catch {
-          // Non-critical — suppress
-        }
+          if (valid.length > 0) await internal.setVisible(valid, false)
+        } catch { /* suppress */ }
       })
     )
   }
 
   async showObjects(globalIds: string[]): Promise<void> {
     if (globalIds.length === 0 || !this.fragmentsManager?.initialized) return
-
     await Promise.all(
       this.loadedModels.map(async (model) => {
         const internal = model as unknown as FragmentsModelInternal
         try {
           const localIds = await internal.getLocalIdsByGuids(globalIds)
           const valid    = localIds.filter((id): id is number => id !== null && id !== undefined)
-          if (valid.length === 0) return
-          await internal.setVisible(valid, true)
-        } catch {
-          // Suppress
-        }
+          if (valid.length > 0) await internal.setVisible(valid, true)
+        } catch { /* suppress */ }
       })
     )
   }
 
   async restoreVisibility(): Promise<void> {
     if (!this.fragmentsManager?.initialized) return
-
     await Promise.all(
       this.loadedModels.map(async (model) => {
         const internal = model as unknown as FragmentsModelInternal
         try {
-          // resetVisible() restores all items to visible — correct v3.4.6 API
           await internal.resetVisible()
-        } catch {
-          // Suppress
-        }
+        } catch { /* suppress */ }
       })
     )
-
     this.isIsolated = false
   }
 
@@ -435,9 +667,7 @@ export class ViewerEngine {
     if (!this.fragmentsManager.initialized) {
       throw new Error('FragmentsManager not initialized. Ensure /public/worker.mjs exists.')
     }
-
     await this.unloadAll()
-
     try {
       const model = await this.ifcLoader.load(buffer, true, fileName)
       await this.fitCameraToModel(model)
@@ -453,14 +683,11 @@ export class ViewerEngine {
 
   private async fitCameraToModel(model: FRAGS.FragmentsModel): Promise<void> {
     try {
-      const box = new THREE.Box3()
-      box.setFromObject(model.object)
-
+      const box = new THREE.Box3().setFromObject(model.object)
       if (box.isEmpty()) {
         await new Promise(resolve => setTimeout(resolve, 150))
         box.setFromObject(model.object)
       }
-
       if (box.isEmpty()) return
 
       const size   = new THREE.Vector3()
@@ -475,9 +702,7 @@ export class ViewerEngine {
 
       const maxDim = Math.max(size.x, size.y, size.z)
       this.world.scene.three.children
-        .filter((c): c is THREE.DirectionalLight =>
-          c instanceof THREE.DirectionalLight && c.castShadow
-        )
+        .filter((c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight && c.castShadow)
         .forEach(sun => {
           sun.position.set(center.x + maxDim, center.y + maxDim * 2, center.z + maxDim)
           sun.target.position.copy(center)
@@ -492,18 +717,85 @@ export class ViewerEngine {
         })
 
       await this.world.camera.controls.fitToBox(box, true, {
-        paddingLeft:   0.1,
-        paddingRight:  0.1,
-        paddingTop:    0.1,
-        paddingBottom: 0.1,
+        paddingLeft: 0.1, paddingRight: 0.1, paddingTop: 0.1, paddingBottom: 0.1,
       })
-
     } catch (err) {
       console.warn('[ViewerEngine] fitCameraToModel failed:', err)
     }
   }
 
+  // ── Camera view switching ─────────────────────────────────
+
+  private getSceneBoundingBox(): THREE.Box3 {
+    const box = new THREE.Box3()
+    for (const model of this.loadedModels) {
+      const modelBox = new THREE.Box3().setFromObject(model.object)
+      if (!modelBox.isEmpty()) box.union(modelBox)
+    }
+    if (box.isEmpty()) box.set(new THREE.Vector3(-5, 0, -5), new THREE.Vector3(5, 5, 5))
+    return box
+  }
+
+  async setCameraPerspective(): Promise<void> {
+    try {
+      const box    = this.getSceneBoundingBox()
+      const center = new THREE.Vector3()
+      const size   = new THREE.Vector3()
+      box.getCenter(center)
+      box.getSize(size)
+      const offset = Math.max(size.x, size.y, size.z) * 1.2
+      await this.world.camera.controls.setLookAt(
+        center.x + offset, center.y + offset, center.z + offset,
+        center.x, center.y, center.z, true
+      )
+    } catch (err) { console.warn('[ViewerEngine] setCameraPerspective failed:', err) }
+  }
+
+  async setCameraTop(): Promise<void> {
+    try {
+      const box    = this.getSceneBoundingBox()
+      const center = new THREE.Vector3()
+      const size   = new THREE.Vector3()
+      box.getCenter(center)
+      box.getSize(size)
+      const height = center.y + Math.max(size.x, size.z) * 1.5 + size.y
+      await this.world.camera.controls.setLookAt(
+        center.x, height, center.z + 0.001,
+        center.x, center.y, center.z, true
+      )
+      await this.world.camera.controls.fitToBox(box, true, {
+        paddingLeft: 0.1, paddingRight: 0.1, paddingTop: 0.1, paddingBottom: 0.1,
+      })
+    } catch (err) { console.warn('[ViewerEngine] setCameraTop failed:', err) }
+  }
+
+  async setCameraFront(): Promise<void> {
+    try {
+      const box    = this.getSceneBoundingBox()
+      const center = new THREE.Vector3()
+      const size   = new THREE.Vector3()
+      box.getCenter(center)
+      box.getSize(size)
+      const distance = Math.max(size.x, size.y, size.z) * 1.5 + size.z * 0.5
+      await this.world.camera.controls.setLookAt(
+        center.x, center.y, center.z + distance,
+        center.x, center.y, center.z, true
+      )
+      await this.world.camera.controls.fitToBox(box, true, {
+        paddingLeft: 0.1, paddingRight: 0.1, paddingTop: 0.1, paddingBottom: 0.1,
+      })
+    } catch (err) { console.warn('[ViewerEngine] setCameraFront failed:', err) }
+  }
+
   // ── Click handler ─────────────────────────────────────────
+  //
+  // PRIMARY PATH for wireframe selection reveal.
+  //
+  // The raycast result contains the clicked localId directly. We call
+  // applyWireframeReveal() synchronously here — before onObjectPicked fires
+  // the React store update — so the mesh reveal happens in the same microtask.
+  //
+  // This bypasses all React scheduling, store reads, and Effect timing.
 
   private handleClick = async (e: MouseEvent): Promise<void> => {
     if (!this.world || !this.fragmentsManager?.initialized) return
@@ -516,7 +808,7 @@ export class ViewerEngine {
     const mouse = new THREE.Vector2(e.clientX, e.clientY)
 
     try {
-      const candidates: Array<{ globalId: string; distance: number }> = []
+      const candidates: Array<{ globalId: string; distance: number; localId: number }> = []
 
       await Promise.all(
         this.loadedModels.map(async (model) => {
@@ -541,17 +833,47 @@ export class ViewerEngine {
           const globalId = guids[0]
           if (typeof globalId !== 'string' || globalId.length === 0) return
 
-          candidates.push({ globalId, distance: result.distance ?? Infinity })
+          candidates.push({ globalId, distance: result.distance ?? Infinity, localId: result.localId })
         })
       )
 
       if (candidates.length === 0) {
+        // Click on empty space
+        if (this.wireframeEnabled) {
+          console.log('[ViewerEngine] Wireframe selection update — clearing (no hit)')
+          this.applyWireframeReveal(new Set())
+        }
         this.config.onObjectPicked(null, false)
         return
       }
 
       candidates.sort((a, b) => a.distance - b.distance)
-      this.config.onObjectPicked(candidates[0].globalId, isMulti)
+      const winner = candidates[0]
+
+      if (this.wireframeEnabled) {
+        // Build the next revealed set
+        let nextIds: Set<number>
+        if (isMulti) {
+          nextIds = new Set(this.revealedLocalIds)
+          if (nextIds.has(winner.localId)) nextIds.delete(winner.localId)
+          else                              nextIds.add(winner.localId)
+        } else {
+          nextIds = new Set([winner.localId])
+        }
+
+        console.log(
+          '[ViewerEngine] Wireframe selection update',
+          `\n  Current selected GlobalId: ${winner.globalId}`,
+          `\n  Current localId: ${winner.localId}`,
+          `\n  Previous revealed localIds: [${[...this.revealedLocalIds].join(', ')}]`,
+          `\n  Next revealed localIds: [${[...nextIds].join(', ')}]`,
+          `\n  Wireframe enabled: ${this.wireframeEnabled}`
+        )
+
+        this.applyWireframeReveal(nextIds)
+      }
+
+      this.config.onObjectPicked(winner.globalId, isMulti)
 
     } catch {
       this.config.onObjectPicked(null, false)
@@ -560,32 +882,16 @@ export class ViewerEngine {
 
   // ── Selection label support ───────────────────────────────
 
-  /**
-   * Resolves the world-space top-center point of an IFC object's
-   * bounding box. Used by SelectionLabel to compute screen position.
-   *
-   * Returns null when:
-   * - FragmentsManager is not initialized
-   * - No models are loaded
-   * - The GlobalId is not found in any model
-   * - The resolved bounding box is empty (unloaded tile)
-   *
-   * The caller (SelectionLabel RAF loop) is responsible for caching
-   * the result and re-projecting it to screen space on every frame.
-   */
   async getObjectWorldTop(globalId: string): Promise<THREE.Vector3 | null> {
     if (!this.fragmentsManager?.initialized) return null
     if (this.loadedModels.length === 0) return null
 
     for (const model of this.loadedModels) {
       const internal = model as unknown as FragmentsModelInternal
-
       let localIds: (number | null)[] = []
       try {
         localIds = await internal.getLocalIdsByGuids([globalId])
-      } catch {
-        continue
-      }
+      } catch { continue }
 
       const localId = localIds[0]
       if (localId === null || localId === undefined) continue
@@ -594,14 +900,11 @@ export class ViewerEngine {
       try {
         box = await internal.getMergedBox([localId])
       } catch {
-        // Fallback: search model object for a rough bbox
-        box = new THREE.Box3()
-        box.setFromObject(model.object)
+        box = new THREE.Box3().setFromObject(model.object)
       }
 
       if (box.isEmpty()) return null
 
-      // Top-center of the bounding box in world space
       const center = new THREE.Vector3()
       box.getCenter(center)
       return new THREE.Vector3(center.x, box.max.y, center.z)
@@ -610,28 +913,18 @@ export class ViewerEngine {
     return null
   }
 
-  /**
-   * Returns the Three.js PerspectiveCamera instance.
-   * Used by SelectionLabel for world-to-screen projection.
-   */
   getCamera(): THREE.PerspectiveCamera | null {
     if (!this.world?.camera?.three) return null
     return this.world.camera.three as THREE.PerspectiveCamera
   }
 
-  /**
-   * Returns the viewer container element.
-   * Used by SelectionLabel to read clientWidth/clientHeight for NDC → px conversion.
-   */
-  getContainerElement(): HTMLDivElement {
-    return this.config.container
-  }
+  getContainerElement(): HTMLDivElement { return this.config.container }
 
   // ── Getters ───────────────────────────────────────────────
 
-  getScene(): THREE.Scene         { return this.world.scene.three }
-  getFragmentsManager()           { return this.fragmentsManager }
-  getLoadedModels()               { return this.loadedModels }
+  getScene(): THREE.Scene     { return this.world.scene.three }
+  getFragmentsManager()       { return this.fragmentsManager }
+  getLoadedModels()           { return this.loadedModels }
 
   // ── Dispose ───────────────────────────────────────────────
 
@@ -639,6 +932,11 @@ export class ViewerEngine {
     if (this.isDisposed) return
     this.isDisposed = true
     try {
+      for (const key of this.wireframeLines.keys()) {
+        this.disposeTileEdges(key)
+      }
+      this.wireframeLines.clear()
+      this.wireframeMaterial.dispose()
       this.ro?.disconnect()
       this.config.container.removeEventListener('click', this.handleClick)
       this.components.dispose()
