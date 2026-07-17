@@ -10,6 +10,7 @@ import { FilterEngine }        from '../core/filter/FilterEngine'
 import IFCUploadZone           from '../features/viewer/IFCUploadZone'
 import SelectionLabel          from './SelectionLabel'
 import { useAllAssignments, useGlobalIdLayerMap } from '../hooks/useAssignments'
+import { useActivities, useGlobalIdActivityMap }  from '../hooks/useActivities'
 
 export default function IFCViewer() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -43,9 +44,16 @@ export default function IFCViewer() {
 
   const activeFilterIds    = useLayerStore(s => s.activeFilterIds)
 
-  // ── Phase 3: Bootstrap DB data ───────────────────────────
+  // ── Phase 3: Bootstrap DB data — layers ──────────────────
+  // React Query deduplicates: subscribing here doesn't fire extra requests.
   useAllAssignments()
   useGlobalIdLayerMap()
+
+  // ── Phase 4: Bootstrap DB data — activities ──────────────
+  // useActivities fetches all activities and syncs to activity store.
+  // useGlobalIdActivityMap patches IFCObject.activityIds for FilterEngine.
+  useActivities()
+  useGlobalIdActivityMap()
 
   // ── Init ViewerEngine once ───────────────────────────────
   useEffect(() => {

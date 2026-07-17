@@ -3,6 +3,7 @@
 @import './styles/zones.css';
 @import './styles/activities.css';
 @import './styles/phase5-additions.css';
+@import './styles/workspace.css';
 
 :root {
   --bg-primary: #0D1117;
@@ -42,7 +43,9 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
-/* ─── LAYOUT ─────────────────────────────────────────────── */
+/* Legacy Phase 5 grid — superseded by .bim-layout-v6 in Phase 6.
+   Keep this rule so any component that still uses class="bim-layout"
+   doesn't break during migration. */
 .bim-layout {
   display: grid;
   grid-template-rows: var(--header-height) 55vh 80px 1fr;

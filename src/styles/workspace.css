@@ -1,0 +1,483 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   workspace.css — Phase 6 Viewer-Centric Workspace Layout
+   ═══════════════════════════════════════════════════════════════════════════
+
+   Design tokens inherit from the existing :root variables in App.css.
+   New tokens introduced here follow the same naming convention.
+
+   Layout hierarchy:
+     .bim-layout-v6              — Full-screen flex column (replaces .bim-layout)
+       .bim-header               — Top toolbar (reused, unchanged)
+       .workspace-body           — flex row: nav-rail + panels + viewer
+         .nav-rail               — 48 px left icon column
+         .slide-panel            — Zero-width when closed; animates open
+         .viewer-workspace       — Fills remaining horizontal space
+           .viewer-toolbar       — Camera-control row above canvas
+           .viewer-canvas-host   — IFC canvas fills this element
+       .gantt-dock               — Bottom dock; height:0 when collapsed
+         .gantt-dock__header     — Always present when dock is rendered
+         .gantt-dock__body       — Scrollable; contains TimelineSlider + chart
+           .timeline-panel       — 4D playback controls (no top border here)
+           .gantt-dock__chart    — Gantt chart, fills remaining dock height
+
+   Phase 6 continuation changes vs initial phase6/workspace.css:
+   - .gantt-dock--collapsed rule: height collapses to 0 (not header height)
+     so the viewer fully reclaims the vertical space.
+   - Added .gantt-dock__chart for the flex child that holds GanttPanel.
+   - .gantt-dock .timeline-panel overrides top/bottom border so the slider
+     integrates cleanly inside the dock without a double-border.
+   - Dock header close button now renders ✕ (matching SlidePanel) — no new CSS.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── New tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --nav-rail-width:       48px;
+  --panel-transition:     0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  --gantt-header-height:  36px;
+  --toolbar-height:       36px;
+  --slide-shadow:         4px 0 24px rgba(0, 0, 0, 0.45);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ROOT LAYOUT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bim-layout-v6 {
+  display:        flex;
+  flex-direction: column;
+  height:         100vh;
+  width:          100vw;
+  overflow:       hidden;
+  background:     var(--bg-primary);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WORKSPACE BODY
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.workspace-body {
+  display:    flex;
+  flex:       1;
+  overflow:   hidden;
+  position:   relative;
+  min-height: 0;  /* allows flex child to shrink below content height */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LEFT NAVIGATION RAIL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.nav-rail {
+  width:            var(--nav-rail-width);
+  flex-shrink:      0;
+  background:       var(--bg-secondary);
+  border-right:     1px solid var(--border-color);
+  display:          flex;
+  flex-direction:   column;
+  justify-content:  space-between;
+  align-items:      center;
+  padding:          8px 0;
+  z-index:          20;
+  overflow:         hidden;
+}
+
+.nav-rail__top,
+.nav-rail__bottom {
+  display:          flex;
+  flex-direction:   column;
+  align-items:      center;
+  gap:              2px;
+  width:            100%;
+}
+
+.nav-rail__separator {
+  width:      28px;
+  height:     1px;
+  background: var(--border-color);
+  margin:     6px auto;
+}
+
+.nav-rail__btn {
+  position:         relative;
+  width:            38px;
+  height:           38px;
+  border-radius:    8px;
+  border:           1px solid transparent;
+  background:       transparent;
+  color:            var(--text-secondary);
+  cursor:           pointer;
+  display:          flex;
+  align-items:      center;
+  justify-content:  center;
+  font-size:        17px;
+  transition:       background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink:      0;
+}
+
+.nav-rail__btn:hover {
+  background:   var(--bg-panel);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+
+.nav-rail__btn:focus-visible {
+  outline:        2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.nav-rail__btn--active {
+  background:   rgba(47, 107, 255, 0.18);
+  border-color: var(--accent-blue);
+  color:        var(--accent-blue);
+}
+
+.nav-rail__icon {
+  line-height: 1;
+}
+
+/* Badge — small pill in top-right corner of icon button */
+.nav-rail__badge {
+  position:         absolute;
+  top:              3px;
+  right:            3px;
+  min-width:        14px;
+  height:           14px;
+  border-radius:    7px;
+  background:       var(--accent-blue);
+  color:            #fff;
+  font-size:        9px;
+  font-weight:      700;
+  display:          flex;
+  align-items:      center;
+  justify-content:  center;
+  padding:          0 3px;
+  pointer-events:   none;
+  letter-spacing:   0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SLIDE-OUT PANEL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.slide-panel {
+  flex-shrink:    0;
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+  background:     var(--bg-panel);
+  border-right:   1px solid var(--border-color);
+  box-shadow:     var(--slide-shadow);
+
+  /* Closed state */
+  width:          0 !important;
+  opacity:        0;
+  pointer-events: none;
+
+  transition:
+    width   var(--panel-transition),
+    opacity var(--panel-transition);
+
+  z-index: 15;
+}
+
+.slide-panel--open {
+  width:          var(--panel-width, 320px) !important;
+  opacity:        1;
+  pointer-events: auto;
+}
+
+.slide-panel__header {
+  background:      var(--bg-secondary);
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         0 12px;
+  height:          36px;
+  flex-shrink:     0;
+}
+
+.slide-panel__title {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color:          var(--text-secondary);
+  white-space:    nowrap;
+  overflow:       hidden;
+  text-overflow:  ellipsis;
+}
+
+.slide-panel__close {
+  background:      transparent;
+  border:          1px solid transparent;
+  border-radius:   4px;
+  color:           var(--text-secondary);
+  width:           22px;
+  height:          22px;
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  font-size:       11px;
+  cursor:          pointer;
+  flex-shrink:     0;
+  transition:      background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.slide-panel__close:hover {
+  background:   var(--bg-panel);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+
+.slide-panel__close:focus-visible {
+  outline:        2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.slide-panel__body {
+  flex:       1;
+  overflow:   auto;
+  min-height: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VIEWER WORKSPACE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.viewer-workspace {
+  flex:           1;
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+  min-width:      0;
+  position:       relative;
+}
+
+.viewer-toolbar {
+  background:      var(--bg-secondary);
+  border-bottom:   1px solid var(--border-color);
+  height:          var(--toolbar-height);
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         0 12px;
+  gap:             8px;
+  flex-shrink:     0;
+  z-index:         10;
+}
+
+.viewer-toolbar__views {
+  display:     flex;
+  align-items: center;
+  gap:         4px;
+}
+
+.viewer-toolbar__filter-badge {
+  display:     flex;
+  align-items: center;
+}
+
+.viewer-canvas-host {
+  flex:       1;
+  position:   relative;
+  overflow:   hidden;
+  background: #070B0F;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GANTT DOCK
+   ═══════════════════════════════════════════════════════════════════════════
+
+   The dock is a flex-shrink:0 child of .bim-layout-v6.
+   Its height is set inline by GanttDock.tsx from workspace.store.ganttHeight.
+
+   Collapsed state: height → 0 (fully hidden; border-top disappears too).
+   This means the viewer above reclaims 100% of the remaining vertical space —
+   identical to how a SlidePanel reclaims horizontal space when closed.
+
+   The CSS transition on `height` provides the smooth open/close animation that
+   matches the SlidePanel's `width` transition. Same easing, same duration.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gantt-dock {
+  flex-shrink:    0;
+  display:        flex;
+  flex-direction: column;
+  background:     var(--bg-primary);
+  border-top:     1px solid var(--border-color);
+  overflow:       hidden;
+  transition:     height var(--panel-transition);
+  position:       relative;
+  z-index:        10;
+}
+
+/* When collapsed, height reaches 0 via the inline style set in GanttDock.tsx.
+   The border-top also visually disappears because the element has no height.
+   We keep the rule below to suppress the body in the rare case where
+   height hasn't finished transitioning. */
+.gantt-dock--collapsed .gantt-dock__body {
+  pointer-events: none;
+  overflow:       hidden;
+}
+
+/* Resize handle — drag target sits at the very top of the dock */
+.gantt-dock__resize-handle {
+  position:   absolute;
+  top:        0;
+  left:       0;
+  right:      0;
+  height:     5px;
+  cursor:     ns-resize;
+  background: transparent;
+  z-index:    20;
+  transition: background 0.15s;
+}
+
+.gantt-dock__resize-handle:hover,
+.gantt-dock__resize-handle:focus-visible {
+  background: rgba(47, 107, 255, 0.3);
+  outline:    none;
+}
+
+.gantt-dock__header {
+  background:      var(--bg-secondary);
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         0 16px;
+  height:          var(--gantt-header-height);
+  flex-shrink:     0;
+}
+
+.gantt-dock__title {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 1.5px;
+  color:          var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.gantt-dock__actions {
+  display:     flex;
+  align-items: center;
+  gap:         6px;
+}
+
+/* Close button — styled identically to .slide-panel__close for consistency */
+.gantt-dock__collapse-btn {
+  background:      transparent;
+  border:          1px solid transparent;
+  border-radius:   4px;
+  color:           var(--text-secondary);
+  width:           22px;
+  height:          22px;
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  font-size:       11px;
+  cursor:          pointer;
+  transition:      background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.gantt-dock__collapse-btn:hover {
+  background:   var(--bg-panel);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+
+.gantt-dock__collapse-btn:focus-visible {
+  outline:        2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+/* Dock body — flex column containing TimelineSlider + GanttPanel */
+.gantt-dock__body {
+  flex:           1;
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+  min-height:     0;
+}
+
+/* GanttPanel host — fills all remaining height below the TimelineSlider */
+.gantt-dock__chart {
+  flex:       1;
+  overflow:   hidden;
+  position:   relative;
+  min-height: 0;
+}
+
+/* ── TimelineSlider inside the dock ──────────────────────────────────────
+   The original .timeline-panel class has a top border. Inside the dock
+   that would create a double-border against the dock header's bottom
+   border. We override it here with a higher-specificity rule.
+   The bottom border stays so the slider visually separates from the chart.
+   ─────────────────────────────────────────────────────────────────────── */
+.gantt-dock__body .timeline-panel {
+  border-top:    none;
+  flex-shrink:   0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SETTINGS PLACEHOLDER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.settings-placeholder {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  height:          100%;
+  padding:         24px;
+}
+
+.settings-placeholder__text {
+  color:      var(--text-secondary);
+  font-size:  13px;
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PANEL-TAB BADGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.panel-tab__badge {
+  display:         inline-flex;
+  align-items:     center;
+  justify-content: center;
+  min-width:       16px;
+  height:          16px;
+  border-radius:   8px;
+  background:      var(--accent-blue);
+  color:           #fff;
+  font-size:       9px;
+  font-weight:     700;
+  padding:         0 4px;
+  margin-left:     5px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE BREAKPOINTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1280px) {
+  .slide-panel--open {
+    max-width: 280px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .bim-header__center .bim-badge:not(.bim-badge--active) {
+    display: none;
+  }
+  .bim-header__subtitle {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .bim-header__right .header-btn:not(:first-child) {
+    display: none;
+  }
+}
