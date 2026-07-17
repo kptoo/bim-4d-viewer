@@ -79,6 +79,76 @@ CREATE INDEX IF NOT EXISTS idx_assignments_global_id
 
 
 ====================================================================================================
+FILE: migrations\002_create_activities.sql
+====================================================================================================
+
+-- Enable UUID generation (idempotent)
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ── activities ───────────────────────────────────────────────
+-- One row per construction schedule task.
+CREATE TABLE IF NOT EXISTS activities (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name         TEXT        NOT NULL,
+  start_date   DATE        NOT NULL,
+  end_date     DATE        NOT NULL,
+  progress     INTEGER     NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+  color        TEXT        NOT NULL DEFAULT '#3498DB',
+  parent_id    UUID        REFERENCES activities (id) ON DELETE SET NULL,
+  dependencies UUID[]      NOT NULL DEFAULT '{}',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Index for ordering by schedule date
+CREATE INDEX IF NOT EXISTS idx_activities_start_date
+  ON activities (start_date ASC);
+
+-- Index for parent-child hierarchy queries
+CREATE INDEX IF NOT EXISTS idx_activities_parent_id
+  ON activities (parent_id)
+  WHERE parent_id IS NOT NULL;
+
+-- ── activity_object_links ────────────────────────────────────
+-- Links an activity to one or more IFC GlobalIds.
+-- global_id is the stable IFC identifier — NOT a FK to any
+-- other table because IFC objects are runtime data, not DB rows.
+CREATE TABLE IF NOT EXISTS activity_object_links (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  activity_id UUID        NOT NULL REFERENCES activities (id) ON DELETE CASCADE,
+  global_id   TEXT        NOT NULL,
+  linked_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Prevent duplicate (activity, object) pairs
+  UNIQUE (activity_id, global_id)
+);
+
+-- Indexes for the two common query patterns:
+--   • Fetch all links for an activity
+--   • Fetch all activities for an IFC object
+CREATE INDEX IF NOT EXISTS idx_activity_links_activity_id
+  ON activity_object_links (activity_id);
+
+CREATE INDEX IF NOT EXISTS idx_activity_links_global_id
+  ON activity_object_links (global_id);
+
+-- ── updated_at trigger ───────────────────────────────────────
+-- Automatically maintains the updated_at column on activities.
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS activities_updated_at ON activities;
+CREATE TRIGGER activities_updated_at
+  BEFORE UPDATE ON activities
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+====================================================================================================
 FILE: package-lock.json
 ====================================================================================================
 
@@ -3971,6 +4041,7 @@ FILE: src\App.css
 @import './styles/upload.css';
 @import './styles/layers.css';
 @import './styles/zones.css';
+@import './styles/activities.css';
 
 :root {
   --bg-primary: #0D1117;
@@ -4965,232 +5036,29 @@ input[type="range"].timeline-input {
   transition: border-color 0.15s;
 }
 
-.tree-search::placeholder {
-  color: var(--text-secondary);
-}
-
-.tree-search:focus {
-  border-color: var(--accent-blue);
-}
-
-.tree-action-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--text-secondary);
-  padding: 3px 7px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.tree-action-btn:hover {
-  background: var(--bg-panel);
-  border-color: var(--border-color);
-  color: var(--text-primary);
-}
-
-.tree-scroll {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-/* ── Tree node row ── */
-.tree-node {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  cursor: pointer;
-  transition: background 0.1s;
-  user-select: none;
-  border-bottom: 1px solid rgba(48, 54, 61, 0.3);
-  padding-right: 8px;
-}
-
-.tree-node:hover {
-  background: rgba(47, 107, 255, 0.06);
-}
-
-.tree-node--selected {
-  background: rgba(47, 107, 255, 0.14) !important;
-  border-left: 2px solid var(--accent-blue);
-}
-
-.tree-node--group .tree-label {
-  color: var(--text-secondary);
-  font-size: 11px;
-}
-
-/* Chevron */
-.tree-chevron {
-  width: 12px;
-  height: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8px;
-  color: transparent;       /* invisible when no children */
-  transition: transform 0.15s, color 0.15s;
-  flex-shrink: 0;
-}
-
-.tree-chevron--visible {
-  color: var(--text-secondary);
-}
-
-.tree-chevron--open {
-  transform: rotate(90deg);
-}
-
-/* Icon */
-.tree-icon {
-  font-size: 12px;
-  flex-shrink: 0;
-  width: 16px;
-  text-align: center;
-}
-
-/* Label */
-.tree-label {
-  flex: 1;
-  font-size: 12px;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* IFC type badge on leaf nodes */
-.tree-type-badge {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 1px 6px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-/* Empty state */
-.tree-empty {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--text-secondary);
-  padding: 20px;
-  text-align: center;
-}
-
-.tree-empty--inline {
-  height: auto;
-  padding: 30px 20px;
-}
-
-.tree-empty__icon {
-  font-size: 36px;
-  opacity: 0.25;
-}
-
-.tree-empty p {
-  font-size: 12px;
-  line-height: 1.6;
-  max-width: 180px;
-}
-
-/* ─── THAT OPEN COMPANY BRANDING — CSS SAFETY NET ───────── */
-/*
- * @thatopen/components SimpleRenderer may inject a branding overlay.
- * ViewerEngine.removeBranding() removes it via DOM manipulation after
- * components.init(). This CSS rule is a secondary safety net that
- * hides any remnant in case the DOM removal was not yet applied.
- *
- * Selectors target the known element IDs/attributes used by OBC v3.x.
- * We hide (not remove) here so we don't break any positional children.
- */
-#thatopen-logo,
-[id*="thatopen"],
-[class*="thatopen"],
-a[href*="thatopen.com"] {
-  display: none !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   OBJECT EXPLORER — additions to existing .tree-* rules
-   Append to end of src/App.css
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/* ─── Stats / mode bar ──────────────────────────────────────────────────── */
-.tree-stats-bar {
-  display:         flex;
-  align-items:     center;
-  gap:             8px;
-  padding:         3px 10px;
-  background:      var(--bg-secondary);
-  border-bottom:   1px solid var(--border-color);
-  flex-shrink:     0;
-  min-height:      22px;
-}
-
-.tree-stats-count {
-  flex:        1;
-  font-size:   10px;
-  color:       var(--text-secondary);
-  font-weight: 500;
-}
-
-.tree-stats-matches {
-  font-size:   10px;
-  color:       var(--accent-blue);
-  font-weight: 600;
-}
-
-.tree-stats-mode {
-  font-size:   10px;
-  color:       var(--accent-green);
-  font-weight: 600;
-}
-
-.tree-stats-mode--fallback {
-  color: var(--text-secondary);
-}
-
-/* ─── Virtual scroll — GPU layer for smooth large-list scrolling ────────── */
-.tree-scroll {
-  will-change: transform;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   PROPERTIES INSPECTOR — complete redesign
-   All classes prefixed .insp-* to avoid collision with old .inspector-*
-   ═══════════════════════════════════════════════════════════════════════════ */
-
+/* ─── IFC INSPECTOR (Phase 3) ────────────────────────────── */
 .insp-body {
-  height:         100%;
-  overflow-y:     auto;
-  overflow-x:     hidden;
   display:        flex;
   flex-direction: column;
+  height:         100%;
+  overflow-y:     auto;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
 }
 
-/* ─── Empty state ───────────────────────────────────────────────────────── */
+.insp-body::-webkit-scrollbar       { width: 4px; }
+.insp-body::-webkit-scrollbar-track  { background: transparent; }
+.insp-body::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
 .insp-empty {
-  height:          100%;
-  display:         flex;
-  flex-direction:  column;
   align-items:     center;
+  display:         flex;
+  flex:            1;
+  flex-direction:  column;
   justify-content: center;
-  gap:             12px;
   padding:         24px;
   text-align:      center;
 }
@@ -5557,62 +5425,691 @@ a[href*="thatopen.com"] {
 
 
 ====================================================================================================
+FILE: src\components\activities\ActivityForm.tsx
+====================================================================================================
+
+import { useState, useCallback, useEffect } from 'react'
+import { useCreateActivity, useUpdateActivity, useDeleteActivity } from '../../hooks/useActivities'
+import { useSelectionStore }   from '../../store/selection.store'
+import type { Activity }       from '../../types'
+
+// ── Colour palette (same as ZonePanel) ───────────────────────────────────────
+
+const PALETTE = [
+  '#E67E22', '#3498DB', '#9B59B6', '#1ABC9C', '#E74C3C',
+  '#2ECC71', '#F39C12', '#E91E63', '#00BCD4', '#8BC34A',
+  '#FF5722', '#607D8B', '#795548', '#FF9800', '#CDDC39',
+]
+
+function randomColor(): string {
+  return PALETTE[Math.floor(Math.random() * PALETTE.length)]
+}
+
+// ── Validation ────────────────────────────────────────────────────────────────
+
+interface FormErrors {
+  name?:      string
+  startDate?: string
+  endDate?:   string
+}
+
+function validateForm(
+  name:      string,
+  startDate: string,
+  endDate:   string
+): FormErrors {
+  const errors: FormErrors = {}
+
+  if (!name.trim()) {
+    errors.name = 'Activity name is required'
+  } else if (name.trim().length > 120) {
+    errors.name = 'Name must be 120 characters or fewer'
+  }
+
+  if (!startDate) {
+    errors.startDate = 'Start date is required'
+  }
+
+  if (!endDate) {
+    errors.endDate = 'End date is required'
+  } else if (startDate && endDate < startDate) {
+    errors.endDate = 'End date must be on or after start date'
+  }
+
+  return errors
+}
+
+// ── Props ─────────────────────────────────────────────────────────────────────
+
+interface ActivityFormProps {
+  /** When provided, the form is in edit mode for this activity */
+  activity?: Activity
+  /** Called when the form should close (after success or cancel) */
+  onClose?: () => void
+}
+
+// ── ActivityForm ──────────────────────────────────────────────────────────────
+
+export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
+  const isEditMode = Boolean(activity)
+
+  // ── Form state ──────────────────────────────────────────────
+  const [name,      setName]      = useState(activity?.name      ?? '')
+  const [startDate, setStartDate] = useState(activity?.startDate ?? '')
+  const [endDate,   setEndDate]   = useState(activity?.endDate   ?? '')
+  const [color,     setColor]     = useState(activity?.color     ?? randomColor)
+  const [errors,    setErrors]    = useState<FormErrors>({})
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  // Reset form when activity prop changes (switching between edit targets)
+  useEffect(() => {
+    if (activity) {
+      setName(activity.name)
+      setStartDate(activity.startDate)
+      setEndDate(activity.endDate)
+      setColor(activity.color)
+    } else {
+      setName('')
+      setStartDate('')
+      setEndDate('')
+      setColor(randomColor())
+    }
+    setErrors({})
+    setShowDeleteConfirm(false)
+  }, [activity])
+
+  // ── Mutations ───────────────────────────────────────────────
+  const createMutation = useCreateActivity()
+  const updateMutation = useUpdateActivity()
+  const deleteMutation = useDeleteActivity()
+  const clearSelection = useSelectionStore(s => s.clearSelection)
+
+  const isPending =
+    createMutation.isPending ||
+    updateMutation.isPending ||
+    deleteMutation.isPending
+
+  // ── Submit ──────────────────────────────────────────────────
+  const handleSubmit = useCallback(() => {
+    const trimmedName = name.trim()
+    const validationErrors = validateForm(trimmedName, startDate, endDate)
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors)
+      return
+    }
+
+    setErrors({})
+
+    if (isEditMode && activity) {
+      updateMutation.mutate(
+        {
+          id:        activity.id,
+          name:      trimmedName,
+          startDate,
+          endDate,
+          color,
+          // linkedGlobalIds intentionally NOT included here — linking is
+          // managed by the ZoneAssignWidget-equivalent in the Inspector panel.
+          // Updating links here would overwrite assignments made elsewhere.
+        },
+        {
+          onSuccess: () => {
+            setTimeout(() => {
+              updateMutation.reset()
+              onClose?.()
+            }, 1500)
+          },
+        }
+      )
+    } else {
+      createMutation.mutate(
+        {
+          name:            trimmedName,
+          startDate,
+          endDate,
+          color,
+          linkedGlobalIds: [],
+          dependencies:    [],
+        },
+        {
+          onSuccess: () => {
+            // Reset form for next create
+            setName('')
+            setStartDate('')
+            setEndDate('')
+            setColor(randomColor())
+            setTimeout(() => {
+              createMutation.reset()
+              onClose?.()
+            }, 1500)
+          },
+        }
+      )
+    }
+  }, [
+    name, startDate, endDate, color, isEditMode, activity,
+    createMutation, updateMutation, onClose,
+  ])
+
+  // ── Delete ──────────────────────────────────────────────────
+  const handleDelete = useCallback(() => {
+    if (!activity) return
+
+    deleteMutation.mutate(
+      activity.id,
+      {
+        onSuccess: () => {
+          // Clear selection if this activity was selected
+          clearSelection()
+          setTimeout(() => {
+            deleteMutation.reset()
+            onClose?.()
+          }, 800)
+        },
+      }
+    )
+  }, [activity, deleteMutation, clearSelection, onClose])
+
+  // ── Shared mutation error ────────────────────────────────────
+  const mutationError =
+    (createMutation.error ?? updateMutation.error ?? deleteMutation.error) as Error | null
+
+  const isSuccess = createMutation.isSuccess || updateMutation.isSuccess
+
+  return (
+    <div className="act-form">
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div className="act-form__header">
+        <span className="act-form__title">
+          {isEditMode ? '✏️ Edit Activity' : '＋ New Activity'}
+        </span>
+        {onClose && (
+          <button
+            className="act-form__close"
+            onClick={onClose}
+            disabled={isPending}
+            title="Close"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* ── Body ───────────────────────────────────────────── */}
+      <div className="act-form__body">
+
+        {/* Name field */}
+        <div className="act-form__field">
+          <label className="act-form__label">Activity Name</label>
+          <div className="act-form__name-row">
+            <input
+              className={`act-form__input${errors.name ? ' act-form__input--error' : ''}`}
+              type="text"
+              placeholder="e.g. Foundation Works, Structural Frame…"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              maxLength={120}
+              disabled={isPending}
+            />
+            <input
+              type="color"
+              className="act-form__color"
+              value={color}
+              onChange={e => setColor(e.target.value)}
+              title="Activity colour"
+              disabled={isPending}
+            />
+          </div>
+          {errors.name && (
+            <span className="act-form__field-error">{errors.name}</span>
+          )}
+        </div>
+
+        {/* Date range */}
+        <div className="act-form__dates">
+          <div className="act-form__field">
+            <label className="act-form__label">Start Date</label>
+            <input
+              className={`act-form__input act-form__input--date${errors.startDate ? ' act-form__input--error' : ''}`}
+              type="date"
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+              disabled={isPending}
+            />
+            {errors.startDate && (
+              <span className="act-form__field-error">{errors.startDate}</span>
+            )}
+          </div>
+
+          <div className="act-form__field">
+            <label className="act-form__label">End Date</label>
+            <input
+              className={`act-form__input act-form__input--date${errors.endDate ? ' act-form__input--error' : ''}`}
+              type="date"
+              value={endDate}
+              min={startDate}
+              onChange={e => setEndDate(e.target.value)}
+              disabled={isPending}
+            />
+            {errors.endDate && (
+              <span className="act-form__field-error">{errors.endDate}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Colour preview strip */}
+        <div
+          className="act-form__color-preview"
+          style={{ background: color }}
+          title={`Activity colour: ${color}`}
+        />
+
+        {/* Submit */}
+        <button
+          className="act-form__submit"
+          onClick={handleSubmit}
+          disabled={isPending || !name.trim() || !startDate || !endDate}
+        >
+          {isPending && !deleteMutation.isPending
+            ? '…'
+            : isEditMode
+              ? '✓ Save Changes'
+              : '＋ Create Activity'}
+        </button>
+
+        {/* Success feedback */}
+        {isSuccess && (
+          <div className="act-form__success">
+            {isEditMode ? '✓ Activity updated' : '✓ Activity created'}
+          </div>
+        )}
+
+        {/* Error feedback */}
+        {mutationError && !deleteMutation.isError && (
+          <div className="act-form__error">
+            {mutationError.message}
+          </div>
+        )}
+      </div>
+
+      {/* ── Delete section (edit mode only) ────────────────── */}
+      {isEditMode && activity && (
+        <div className="act-form__delete-zone">
+          {!showDeleteConfirm ? (
+            <button
+              className="act-form__delete-btn"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={isPending}
+            >
+              🗑 Delete Activity
+            </button>
+          ) : (
+            <div className="act-form__delete-confirm">
+              <p className="act-form__delete-warning">
+                Delete <strong>{activity.name}</strong>? This cannot be undone.
+              </p>
+              <div className="act-form__delete-actions">
+                <button
+                  className="act-form__delete-confirm-btn"
+                  onClick={handleDelete}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending ? '…' : 'Yes, Delete'}
+                </button>
+                <button
+                  className="act-form__delete-cancel-btn"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={deleteMutation.isPending}
+                >
+                  Cancel
+                </button>
+              </div>
+              {deleteMutation.isError && (
+                <div className="act-form__error">
+                  {(deleteMutation.error as Error).message}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+====================================================================================================
+FILE: src\components\activities\ActivityPanel.tsx
+====================================================================================================
+
+import { useState }             from 'react'
+import { useActivityStore }     from '../../store/activity.store'
+import { useSelectionStore }    from '../../store/selection.store'
+import { useActivities }        from '../../hooks/useActivities'
+import ActivityForm             from './ActivityForm'
+import type { Activity }        from '../../types'
+
+// ── Status helpers ────────────────────────────────────────────────────────────
+
+function getActivityDurationDays(activity: Activity): number {
+  const start = new Date(activity.startDate).getTime()
+  const end   = new Date(activity.endDate).getTime()
+  return Math.round((end - start) / (1000 * 60 * 60 * 24))
+}
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+}
+
+// ── ActivityCard ─────────────────────────────────────────────────────────────
+
+interface ActivityCardProps {
+  activity:   Activity
+  isSelected: boolean
+  onSelect:   (activity: Activity) => void
+  onEdit:     (activity: Activity) => void
+}
+
+function ActivityCard({ activity, isSelected, onSelect, onEdit }: ActivityCardProps) {
+  const linkedCount = activity.linkedGlobalIds.length
+  const duration    = getActivityDurationDays(activity)
+
+  return (
+    <div
+      className={`act-card${isSelected ? ' act-card--selected' : ''}`}
+      onClick={() => onSelect(activity)}
+    >
+      <div
+        className="act-card__stripe"
+        style={{ background: activity.color }}
+      />
+      <div className="act-card__body">
+        <div className="act-card__name">{activity.name}</div>
+        <div className="act-card__dates">
+          {formatDate(activity.startDate)} → {formatDate(activity.endDate)}
+          <span className="act-card__duration"> · {duration}d</span>
+        </div>
+        <div className="act-card__meta">
+          <span
+            className="act-card__link-badge"
+            title={`${linkedCount} IFC element${linkedCount !== 1 ? 's' : ''} linked`}
+          >
+            🔗 {linkedCount}
+          </span>
+        </div>
+      </div>
+      <button
+        className="act-card__edit-btn"
+        onClick={e => { e.stopPropagation(); onEdit(activity) }}
+        title="Edit activity"
+      >
+        ✏️
+      </button>
+    </div>
+  )
+}
+
+// ── ActivityPanel ─────────────────────────────────────────────────────────────
+
+export default function ActivityPanel() {
+  const activities         = useActivityStore(s => s.activities)
+  const isLoaded           = useActivityStore(s => s.isLoaded)
+  const selectedActivityId = useSelectionStore(s => s.selectedActivityId)
+  const selectActivity     = useSelectionStore(s => s.selectActivity)
+
+  // Trigger fetch + sync to store
+  const { isLoading, isError, error } = useActivities()
+
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null)
+  const [showCreateForm,  setShowCreateForm]  = useState(false)
+
+  const handleSelectActivity = (activity: Activity) => {
+    selectActivity(activity.id, activity.linkedGlobalIds[0])
+    // Don't auto-open edit mode on selection — that's a separate action
+  }
+
+  const handleEditActivity = (activity: Activity) => {
+    setEditingActivity(activity)
+    setShowCreateForm(false)
+  }
+
+  const handleCloseForm = () => {
+    setEditingActivity(null)
+    setShowCreateForm(false)
+  }
+
+  const handleNewClick = () => {
+    setEditingActivity(null)
+    setShowCreateForm(prev => !prev)
+  }
+
+  return (
+    <div className="act-panel">
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div className="act-panel__header">
+        <span className="act-panel__title">Activities</span>
+        {isLoaded && (
+          <span className="act-panel__count">{activities.length}</span>
+        )}
+        <button
+          className={`act-panel__new-btn${showCreateForm ? ' act-panel__new-btn--active' : ''}`}
+          onClick={handleNewClick}
+          title={showCreateForm ? 'Cancel' : 'Create a new activity'}
+        >
+          {showCreateForm ? '✕' : '＋ New'}
+        </button>
+      </div>
+
+      {/* ── Create form ────────────────────────────────────── */}
+      {showCreateForm && (
+        <div className="act-panel__form-wrap">
+          <ActivityForm onClose={handleCloseForm} />
+        </div>
+      )}
+
+      {/* ── Edit form ──────────────────────────────────────── */}
+      {editingActivity && (
+        <div className="act-panel__form-wrap">
+          <ActivityForm
+            activity={editingActivity}
+            onClose={handleCloseForm}
+          />
+        </div>
+      )}
+
+      {/* ── List ───────────────────────────────────────────── */}
+      <div className="act-panel__list">
+
+        {isLoading && !isLoaded && (
+          <div className="act-panel__state">
+            <div className="act-panel__spinner" />
+            <span>Loading activities…</span>
+          </div>
+        )}
+
+        {isError && (
+          <div className="act-panel__error">
+            {(error as Error)?.message ?? 'Failed to load activities'}
+          </div>
+        )}
+
+        {isLoaded && activities.length === 0 && (
+          <div className="act-panel__empty">
+            <div className="act-panel__empty-icon">📅</div>
+            <p className="act-panel__empty-title">No Activities Yet</p>
+            <p className="act-panel__empty-hint">
+              Click <strong>＋ New</strong> to create your first construction activity.
+            </p>
+          </div>
+        )}
+
+        {activities.map(activity => (
+          <ActivityCard
+            key={activity.id}
+            activity={activity}
+            isSelected={selectedActivityId === activity.id}
+            onSelect={handleSelectActivity}
+            onEdit={handleEditActivity}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
+====================================================================================================
 FILE: src\components\GanttPanel.tsx
 ====================================================================================================
 
 import { useMemo } from 'react'
-import { useActivityStore } from '../store/activity.store'
+import { useActivityStore }  from '../store/activity.store'
 import { useSelectionStore } from '../store/selection.store'
 import { useSimulationStore } from '../store/simulation.store'
-import type { Activity } from '../types'
+import { useActivities }     from '../hooks/useActivities'
+import type { Activity }     from '../types'
 
-const PROJECT_START = new Date('2024-01-01').getTime()
-const PROJECT_END   = new Date('2024-12-31').getTime()
-const LABEL_WIDTH   = 160
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-function dateToPercent(dateStr: string): number {
-  const t = new Date(dateStr).getTime()
-  return ((t - PROJECT_START) / (PROJECT_END - PROJECT_START)) * 100
+const LABEL_WIDTH = 160
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const STATUS_COLOR: Record<string, string> = {
+  completed: '#2ECC71',
+  active:    '#2F6BFF',
+  future:    '#B0B0B0',
 }
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-const STATUS_COLOR = { completed: '#2ECC71', active: '#2F6BFF', future: '#B0B0B0' }
+function dateToPercent(dateStr: string, rangeStart: number, rangeEnd: number): number {
+  const t    = new Date(dateStr).getTime()
+  const span = rangeEnd - rangeStart
+  if (span === 0) return 0
+  return Math.max(0, Math.min(100, ((t - rangeStart) / span) * 100))
+}
+
+/**
+ * Derives the project date range from the loaded activities.
+ * Falls back to the current calendar year when no activities are loaded.
+ */
+function deriveProjectRange(activities: Activity[]): { start: number; end: number } {
+  if (activities.length === 0) {
+    const now   = new Date()
+    const year  = now.getFullYear()
+    return {
+      start: new Date(`${year}-01-01`).getTime(),
+      end:   new Date(`${year}-12-31`).getTime(),
+    }
+  }
+
+  let min = Infinity
+  let max = -Infinity
+  for (const a of activities) {
+    const s = new Date(a.startDate).getTime()
+    const e = new Date(a.endDate).getTime()
+    if (s < min) min = s
+    if (e > max) max = e
+  }
+
+  // Add one-month padding on each side
+  const padding = 30 * 24 * 60 * 60 * 1000
+  return { start: min - padding, end: max + padding }
+}
+
+// ── GanttPanel ────────────────────────────────────────────────────────────────
 
 export default function GanttPanel() {
-  const activities       = useActivityStore(s => s.activities)
+  // Trigger fetch + sync to store (React Query deduplicates if already mounted)
+  const { isLoading, isError } = useActivities()
+
+  const activities         = useActivityStore(s => s.activities)
+  const isLoaded           = useActivityStore(s => s.isLoaded)
   const selectedActivityId = useSelectionStore(s => s.selectedActivityId)
-  const primaryGlobalId  = useSelectionStore(s => s.primaryGlobalId)
-  const selectActivity   = useSelectionStore(s => s.selectActivity)
-  const currentDate      = useSimulationStore(s => s.currentDate)
-  const computeAllFrames = useSimulationStore(s => s.computeAllFrames)
+  const primaryGlobalId    = useSelectionStore(s => s.primaryGlobalId)
+  const selectActivity     = useSelectionStore(s => s.selectActivity)
+  const currentDate        = useSimulationStore(s => s.currentDate)
+  const computeAllFrames   = useSimulationStore(s => s.computeAllFrames)
 
-  const nowPct = useMemo(() =>
-    ((currentDate.getTime() - PROJECT_START) / (PROJECT_END - PROJECT_START)) * 100,
-  [currentDate])
+  // Derive date range from actual activities
+  const { start: rangeStart, end: rangeEnd } = useMemo(
+    () => deriveProjectRange(activities),
+    [activities]
+  )
 
-  // Compute all frames once per render
-  const frames = computeAllFrames(activities)
+  const nowPct = useMemo(
+    () => dateToPercent(currentDate.toISOString(), rangeStart, rangeEnd),
+    [currentDate, rangeStart, rangeEnd]
+  )
+
+  // Compute all simulation frames once per render
+  const frames = useMemo(
+    () => computeAllFrames(activities),
+    [computeAllFrames, activities]
+  )
 
   const handleActivityClick = (activity: Activity) => {
     selectActivity(activity.id, activity.linkedGlobalIds[0])
+  }
+
+  // ── Loading state ─────────────────────────────────────────
+  if (isLoading && !isLoaded) {
+    return (
+      <div className="gantt-wrap gantt-wrap--state">
+        <div className="gantt-state">
+          <div className="gantt-state__spinner" />
+          <span className="gantt-state__text">Loading activities…</span>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Error state ───────────────────────────────────────────
+  if (isError) {
+    return (
+      <div className="gantt-wrap gantt-wrap--state">
+        <div className="gantt-state gantt-state--error">
+          ⚠️ Failed to load activities
+        </div>
+      </div>
+    )
+  }
+
+  // ── Empty state ───────────────────────────────────────────
+  if (isLoaded && activities.length === 0) {
+    return (
+      <div className="gantt-wrap gantt-wrap--state">
+        <div className="gantt-empty">
+          <div className="gantt-empty__icon">📅</div>
+          <p className="gantt-empty__title">No Activities</p>
+          <p className="gantt-empty__hint">
+            Create activities in the <strong>Activities</strong> tab to see them here.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="gantt-wrap">
       <div className="gantt-chart">
 
-        {/* Month header */}
+        {/* ── Month header ─────────────────────────────────── */}
         <div
           className="gantt-month-header"
           style={{ gridTemplateColumns: `${LABEL_WIDTH}px repeat(12, 1fr)` }}
         >
           <div style={{
             borderRight: '1px solid var(--border-color)',
-            padding: '6px 10px',
-            fontSize: 10,
-            color: 'var(--text-secondary)',
-            fontWeight: 700,
+            padding:     '6px 10px',
+            fontSize:    10,
+            color:       'var(--text-secondary)',
+            fontWeight:  700,
           }}>
             TASK
           </div>
@@ -5621,18 +6118,18 @@ export default function GanttPanel() {
           ))}
         </div>
 
-        {/* Activity rows */}
-        {activities.map(activity => {
-          const startPct   = dateToPercent(activity.startDate)
-          const endPct     = dateToPercent(activity.endDate)
-          const widthPct   = endPct - startPct
+        {/* ── Activity rows ─────────────────────────────────── */}
+        {activities.map((activity, idx) => {
+          const startPct = dateToPercent(activity.startDate, rangeStart, rangeEnd)
+          const endPct   = dateToPercent(activity.endDate,   rangeStart, rangeEnd)
+          const widthPct = Math.max(0.5, endPct - startPct)
 
-          // Derive status from the pre-computed frame of the first linked object
-          const firstFrame  = activity.linkedGlobalIds[0]
+          // Status from the first linked object's simulation frame
+          const firstFrame = activity.linkedGlobalIds[0]
             ? frames.get(activity.linkedGlobalIds[0])
             : undefined
-          const status       = firstFrame?.status ?? 'future'
-          const statusColor  = STATUS_COLOR[status]
+          const status      = firstFrame?.status ?? 'future'
+          const statusColor = STATUS_COLOR[status]
 
           const isSelected    = selectedActivityId === activity.id
           const isHighlighted = primaryGlobalId !== null &&
@@ -5643,24 +6140,33 @@ export default function GanttPanel() {
               key={activity.id}
               className={[
                 'gantt-row',
-                isSelected    ? 'selected'    : '',
-                isHighlighted && !isSelected ? 'highlighted' : '',
+                isSelected                      ? 'selected'    : '',
+                isHighlighted && !isSelected    ? 'highlighted' : '',
               ].join(' ').trim()}
               style={{ gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }}
               onClick={() => handleActivityClick(activity)}
             >
-              {/* Label */}
+              {/* Label column */}
               <div className="gantt-task-label">
-                <div className="gantt-status-dot" style={{ background: statusColor }} />
-                <span className="gantt-task-name">{activity.name}</span>
+                <div
+                  className="gantt-status-dot"
+                  style={{ background: statusColor }}
+                />
+                <span
+                  className="gantt-task-name"
+                  title={activity.name}
+                >
+                  {activity.name}
+                </span>
               </div>
 
-              {/* Bar area */}
+              {/* Bar column */}
               <div className="gantt-bar-cell" style={{ position: 'relative' }}>
-                {/* Now line — only on first row to avoid duplication */}
-                {activity === activities[0] && nowPct >= 0 && nowPct <= 100 && (
+
+                {/* "NOW" line — only on first row to avoid duplication */}
+                {idx === 0 && nowPct >= 0 && nowPct <= 100 && (
                   <>
-                    <div className="gantt-now-line" style={{ left: `${nowPct}%` }} />
+                    <div className="gantt-now-line"  style={{ left: `${nowPct}%` }} />
                     <div className="gantt-now-label" style={{ left: `${nowPct}%` }}>NOW</div>
                   </>
                 )}
@@ -5669,8 +6175,8 @@ export default function GanttPanel() {
                 <div
                   className="gantt-bar"
                   style={{
-                    left:      `${startPct}%`,
-                    width:     `${widthPct}%`,
+                    left:       `${startPct}%`,
+                    width:      `${widthPct}%`,
                     background: activity.color,
                     opacity:    status === 'future' ? 0.45 : 1,
                     boxShadow:  isSelected
@@ -5678,7 +6184,11 @@ export default function GanttPanel() {
                       : '0 2px 6px rgba(0,0,0,0.3)',
                   }}
                 >
-                  {widthPct > 8 && activity.name}
+                  {widthPct > 8 && (
+                    <span className="gantt-bar__label">
+                      {activity.name}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -5705,6 +6215,7 @@ import { useLayerStore }      from '../store/layer.store'
 import { useSimulationStore } from '../store/simulation.store'
 import { ifcTypeIcon }        from '../utils/ifc.utils'
 import ZoneAssignWidget       from './zones/ZoneAssignWidget'
+import { useAllAssignments }  from '../hooks/useAssignments'
 import type { IFCObject, IFCProperty, Activity, SimulationStatus } from '../types'
 
 // ─── Status labels ────────────────────────────────────────────────────────────
@@ -5721,12 +6232,13 @@ interface SectionProps {
   title:        string
   defaultOpen?: boolean
   badge?:       number
+  badgeLoading?: boolean
   accentColor?: string
   children:     ReactNode
 }
 
 const Section = memo(function Section({
-  title, defaultOpen = true, badge, accentColor, children,
+  title, defaultOpen = true, badge, badgeLoading, accentColor, children,
 }: SectionProps) {
   const [open, setOpen] = useState(defaultOpen)
 
@@ -5739,9 +6251,11 @@ const Section = memo(function Section({
       >
         <span className={`insp-chevron${open ? ' insp-chevron--open' : ''}`}>▶</span>
         <span className="insp-section-title">{title}</span>
-        {badge !== undefined && (
+        {badgeLoading ? (
+          <span className="insp-section-badge" style={{ opacity: 0.4 }}>…</span>
+        ) : badge !== undefined ? (
           <span className="insp-section-badge">{badge}</span>
-        )}
+        ) : null}
       </button>
 
       {open && (
@@ -5896,6 +6410,35 @@ export default function IFCInspector() {
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
 
+  // ── Assignments — subscribe to the same React Query cache entry ───────────
+  //
+  // ROOT CAUSE OF THE BUG:
+  // IFCInspector read zone data via getLayersForObject(), which reads from
+  // layer.store.assignments. That store is populated by useAllAssignments()
+  // in IFCViewer.tsx — but the fetch is asynchronous. When the user selects
+  // an element immediately after model load, the fetch may not have completed
+  // yet, so assignments = [] and getLayersForObject() returns [].
+  //
+  // Opening ExistingZonesPanel didn't fix the data — it just allowed enough
+  // time for the background fetch to complete and call setAssignments().
+  //
+  // THE FIX:
+  // Call useAllAssignments() here. React Query deduplicates by queryKey —
+  // this does NOT fire a second network request. It simply subscribes this
+  // component to the same cache entry already being managed by IFCViewer.
+  // IFCInspector now knows whether the data is loading (isLoading) and
+  // re-renders automatically the moment assignments arrive in the cache.
+  //
+  // This makes IFCInspector self-sufficient: it displays correct zone counts
+  // immediately after selection, with no dependency on ExistingZonesPanel
+  // being mounted or any tab-switching by the user.
+  //
+  // The getLayersForObject() call still reads from the Zustand store (which
+  // useAllAssignments populates via its useEffect), so the data path is
+  // identical — we just ensure we re-render when it becomes available.
+
+  const { isLoading: assignmentsLoading } = useAllAssignments()
+
   // ── Isolation toggle ───────────────────────────────────────
   const [isIsolated, setIsIsolated] = useState(false)
 
@@ -5909,7 +6452,9 @@ export default function IFCInspector() {
       ? getActivitiesForObject(ifcObject.globalId)[0]
       : undefined
 
-  // Zones assigned to this object — used for the badge count on the section header
+  // Zones assigned to this object.
+  // getLayersForObject reads from layer.store.assignments, which is now
+  // guaranteed to be populated because we subscribe to useAllAssignments().
   const assignedZones = ifcObject ? getLayersForObject(ifcObject.globalId) : []
 
   const frames = computeAllFrames(activities)
@@ -6034,18 +6579,21 @@ export default function IFCInspector() {
 
       {/*
         ── Zone Assignment ─────────────────────────────────────────────────────
-        Rendered as a permanent Section immediately below the action bar.
-        Always open by default (defaultOpen={true}) — no toggle required.
-        The badge shows the count of currently assigned zones at a glance.
+        The badge count is derived from assignedZones (Zustand store).
+        While the assignments query is still loading, show a "…" placeholder
+        so the user knows data is incoming rather than seeing a stale 0.
 
-        This is the Archicad-style workflow:
-          Select object → Inspector shows Zone Assignment → Assign.
-        No tab switching. No scrolling. No hidden panel to discover.
+        ZoneAssignWidget uses useAssignmentsByGlobalId() internally — a
+        per-object query that is also deduplicated by React Query. Both
+        the badge here and the widget's list are always in sync because
+        mutations in ZoneAssignWidget invalidate assignmentKeys.all,
+        which triggers a refetch that updates both this badge and the list.
       */}
       <Section
         title="Zone Assignment"
         defaultOpen={true}
         badge={assignedZones.length > 0 ? assignedZones.length : undefined}
+        badgeLoading={assignmentsLoading && assignedZones.length === 0}
         accentColor="var(--accent-blue)"
       >
         <ZoneAssignWidget />
@@ -6948,9 +7496,9 @@ export default function IFCViewer() {
   const setModelError       = useViewerStore(s => s.setModelError)
   const resetModel          = useViewerStore(s => s.resetModel)
   const setEngineActions    = useViewerStore(s => s.setEngineActions)
+  const setCameraActions    = useViewerStore(s => s.setCameraActions)
   const clearEngineActions  = useViewerStore(s => s.clearEngineActions)
 
-  // Read current action slots so we can detect when they are null
   const zoomToObject    = useViewerStore(s => s.zoomToObject)
   const isolateObjects  = useViewerStore(s => s.isolateObjects)
 
@@ -6991,9 +7539,6 @@ export default function IFCViewer() {
         console.log('[IFCViewer] onSceneReady — registering engine actions')
         setSceneReady(true)
 
-        // ── Register engine action callbacks into the store ──
-        // Done inside onSceneReady so the engine is fully booted
-        // before any component can call the callbacks.
         setEngineActions(
           (globalId: string) => {
             console.log('[IFCViewer] zoomToObject called — globalId:', globalId)
@@ -7003,6 +7548,13 @@ export default function IFCViewer() {
             console.log('[IFCViewer] isolateObjects called — count:', globalIds.length)
             engineRef.current?.isolateObjects(globalIds).catch(console.warn)
           }
+        )
+
+        setCameraActions(
+          () => { engineRef.current?.setCameraPerspective().catch(console.warn) },
+          () => { engineRef.current?.setCameraTop().catch(console.warn) },
+          () => { engineRef.current?.setCameraFront().catch(console.warn) },
+          (enabled: boolean) => { engineRef.current?.setWireframe(enabled) }
         )
       },
 
@@ -7040,33 +7592,18 @@ export default function IFCViewer() {
   }, [])
 
   // ── Guard: re-register engine actions if they were wiped ─
-  //
-  // This is a belt-and-suspenders safety net. The primary fix is in
-  // viewer.store.ts (resetModel no longer nulls the callbacks). However,
-  // if any code path ever nulls zoomToObject / isolateObjects while the
-  // engine is still alive, this effect immediately restores them.
-  //
-  // It fires whenever sceneReady becomes true OR whenever the callbacks
-  // are discovered to be null while the engine is live.
-  //
   useEffect(() => {
     const engine = engineRef.current
     if (!engine || !sceneReady) return
     if (zoomToObject !== null && isolateObjects !== null) return
 
-    console.warn(
-      '[IFCViewer] ⚠ Engine action callbacks are null while engine is alive — restoring.',
-      'zoomToObject:', zoomToObject,
-      'isolateObjects:', isolateObjects,
-    )
+    console.warn('[IFCViewer] ⚠ Engine action callbacks are null while engine is alive — restoring.')
 
     setEngineActions(
       (globalId: string) => {
-        console.log('[IFCViewer] zoomToObject (restored) — globalId:', globalId)
         engineRef.current?.zoomToObject(globalId).catch(console.warn)
       },
       (globalIds: string[]) => {
-        console.log('[IFCViewer] isolateObjects (restored) — count:', globalIds.length)
         engineRef.current?.isolateObjects(globalIds).catch(console.warn)
       }
     )
@@ -7188,7 +7725,7 @@ export default function IFCViewer() {
     modelLoadState,
   ])
 
-  // ── Effect 3 (Phase 3): Layer filter visibility ──────────
+  // ── Effect 3: Layer filter visibility ───────────────────
   useEffect(() => {
     const engine = engineRef.current
     if (!engine || modelLoadState !== 'loaded' || ifcObjects.length === 0) return
@@ -7206,6 +7743,62 @@ export default function IFCViewer() {
     ]).catch(console.warn)
 
   }, [activeFilterIds, ifcObjects, modelLoadState])
+
+  // ── Effect 4: Wireframe selection reveal (programmatic path) ──
+  //
+  // ARCHITECTURE — TWO PATHS FOR WIREFRAME SELECTION REVEAL
+  // ─────────────────────────────────────────────────────────
+  //
+  // PATH 1 — 3D click (handled in ViewerEngine.handleClick):
+  //   The raycast result already contains the localId of the clicked element.
+  //   ViewerEngine calls setWireframeSelection() synchronously, before
+  //   onObjectPicked() fires. This bypasses React scheduling entirely.
+  //   No store reads, no async waits, no Effect 4 needed.
+  //
+  // PATH 2 — Programmatic selection (Gantt, Object Tree, this effect):
+  //   Selection originates outside the 3D scene. The engine doesn't know about
+  //   it until the store updates and this effect fires. We call
+  //   engine.updateWireframeSelection(globalIds) which resolves to localIds
+  //   and calls setWireframeSelection internally.
+  //
+  // WHY WE CHECK engine.isWireframeEnabled() INSTEAD OF wireframeActive:
+  //   wireframeActive in viewer.store is the UI state (set by Layout.tsx button).
+  //   engine.isWireframeEnabled() is the engine's actual rendering state.
+  //   These should always agree, but if viewer.store.ts wasn't updated with
+  //   wireframeActive (original codebase doesn't have it), wireframeActive
+  //   would be undefined → always falsy → Effect 4 exits silently every time.
+  //   Checking the engine directly is robust regardless of store version.
+  //
+  // NOTE: For clicks, Path 1 already handled the reveal. This effect running
+  // again is a no-op because updateWireframeSelection() will resolve the same
+  // GlobalIds to the same localIds already revealed by Path 1.
+
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine || modelLoadState !== 'loaded') return
+
+    // Query the engine's actual state — robust against store version mismatches
+    if (!engine.isWireframeEnabled()) return
+
+    const globalIds = Array.from(selectedGlobalIds)
+
+    console.log(
+      '[IFCViewer] Effect 4 — wireframe selection update (programmatic path)',
+      `selectedGlobalIds: [${globalIds.slice(0, 3).join(', ')}${globalIds.length > 3 ? '…' : ''}]`
+    )
+
+    // updateWireframeSelection handles empty array → clear reveal
+    engine.updateWireframeSelection(globalIds).catch(console.warn)
+
+  }, [
+    selectedGlobalIds,
+    primaryGlobalId,
+    modelLoadState,
+    // wireframeActive intentionally omitted — we check engine.isWireframeEnabled()
+    // directly to avoid dependency on store version. The effect still fires on
+    // selection changes regardless of wireframe state; the guard inside
+    // engine.isWireframeEnabled() exits cleanly when wireframe is off.
+  ])
 
   // ── Stats counts ─────────────────────────────────────────
   const frames = computeAllFrames(activities)
@@ -7225,12 +7818,6 @@ export default function IFCViewer() {
 
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
-      {/*
-        ── Selection Label ──────────────────────────────────────────────────────
-        Always mounted. Manages its own visibility via RAF + direct DOM mutation.
-        Positioned inside the viewer container so it clips to the 3D viewport.
-        Rendered only when a model is loaded (no label over loading/error states).
-      */}
       {modelLoadState === 'loaded' && (
         <SelectionLabel engineRef={engineRef} />
       )}
@@ -7871,11 +8458,13 @@ import IFCObjectTree             from './IFCObjectTree'
 import ZonePanel                 from './zones/ZonePanel'
 import ExistingZonesPanel        from './zones/ExistingZonesPanel'
 import ZoneFilterBar             from './zones/ZoneFilterBar'
+import ActivityPanel             from './activities/ActivityPanel'
 import { useViewerStore }        from '../store/viewer.store'
 import { useLayerStore }         from '../store/layer.store'
+import { useActivityStore }      from '../store/activity.store'
 import { IFCUploadService }      from '../services/ifc/IFCUploadService'
 
-type RightTab = 'inspector' | 'tree' | 'zones' | 'existing-zones'
+type RightTab = 'inspector' | 'tree' | 'zones' | 'existing-zones' | 'activities'
 
 export default function Layout() {
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
@@ -7884,9 +8473,67 @@ export default function Layout() {
   const modelFileSize  = useViewerStore(s => s.modelFileSize)
   const resetModel     = useViewerStore(s => s.resetModel)
 
+  // ── Camera view state ────────────────────────────────────
+  const renderMode          = useViewerStore(s => s.renderMode)
+  const wireframeActive     = useViewerStore(s => s.wireframeActive)
+  const setRenderMode       = useViewerStore(s => s.setRenderMode)
+  const setWireframeActive  = useViewerStore(s => s.setWireframeActive)
+
+  // Camera action callbacks — registered by IFCViewer once the engine is ready
+  const setCameraPerspective = useViewerStore(s => s.setCameraPerspective)
+  const setCameraTop         = useViewerStore(s => s.setCameraTop)
+  const setCameraFront       = useViewerStore(s => s.setCameraFront)
+  const setWireframe         = useViewerStore(s => s.setWireframe)
+
   const activeFilterIds = useLayerStore(s => s.activeFilterIds)
+  const activityCount   = useActivityStore(s => s.activities.length)
 
   const [rightTab, setRightTab] = useState<RightTab>('inspector')
+
+  // ── Camera button handlers ────────────────────────────────
+
+  const handlePerspective = () => {
+    setRenderMode('perspective')
+    setCameraPerspective?.()
+  }
+
+  const handleTop = () => {
+    setRenderMode('top')
+    setCameraTop?.()
+  }
+
+  const handleFront = () => {
+    setRenderMode('front')
+    setCameraFront?.()
+  }
+
+  /**
+   * Wireframe is a rendering toggle independent of the active camera view.
+   * It can be combined with any view (Perspective, Top, Front).
+   *
+   * When enabled: renderMode shows 'wireframe' to keep the button active.
+   * When disabled: renderMode reverts to the last non-wireframe view so
+   * the correct view button re-activates.
+   */
+  const handleWireframe = () => {
+    const next = !wireframeActive
+
+    // Track the last camera view so we can restore it when wireframe is off
+    if (next) {
+      // Activating wireframe — remember current non-wireframe mode via renderMode
+      setRenderMode('wireframe')
+    } else {
+      // Deactivating wireframe — restore previous camera view mode.
+      // We default to 'perspective' since we can't store the pre-wireframe
+      // mode without a separate state field. The button visual updates
+      // correctly: none of the view buttons will show as active while
+      // wireframe is on, and Perspective re-activates when it's off.
+      setRenderMode('perspective')
+    }
+
+    setWireframeActive(next)
+    setWireframe?.(next)
+  }
 
   return (
     <div className="bim-layout">
@@ -7916,6 +8563,11 @@ export default function Layout() {
           <span className="bim-badge">
             {ifcObjects.length} Elements
           </span>
+          {activityCount > 0 && (
+            <span className="bim-badge">
+              📅 {activityCount} {activityCount === 1 ? 'Activity' : 'Activities'}
+            </span>
+          )}
           {activeFilterIds.length > 0 && (
             <span className="bim-badge bim-badge--zone-filter">
               📐 {activeFilterIds.length} zone{activeFilterIds.length !== 1 ? 's' : ''} filtered
@@ -7939,10 +8591,50 @@ export default function Layout() {
         <div className="panel-header">
           <span className="panel-header__label">3D Model Viewer</span>
           <div className="panel-header__actions">
-            <button className="panel-action-btn active">Perspective</button>
-            <button className="panel-action-btn">Top</button>
-            <button className="panel-action-btn">Front</button>
-            <button className="panel-action-btn">Wireframe</button>
+            {/*
+              Camera view buttons: Perspective / Top / Front are mutually
+              exclusive view modes. The active class tracks renderMode.
+
+              Wireframe is an independent toggle layered on top of the
+              current view. Its active state is tracked by wireframeActive
+              rather than renderMode so enabling wireframe does not clear
+              the active view button.
+
+              Buttons are visually disabled (pointer-events off, reduced
+              opacity) when the engine is not yet ready (callbacks are null).
+            */}
+            <button
+              className={`panel-action-btn${renderMode === 'perspective' ? ' active' : ''}`}
+              onClick={handlePerspective}
+              disabled={setCameraPerspective === null}
+              title="Perspective view"
+            >
+              Perspective
+            </button>
+            <button
+              className={`panel-action-btn${renderMode === 'top' ? ' active' : ''}`}
+              onClick={handleTop}
+              disabled={setCameraTop === null}
+              title="Top view (plan)"
+            >
+              Top
+            </button>
+            <button
+              className={`panel-action-btn${renderMode === 'front' ? ' active' : ''}`}
+              onClick={handleFront}
+              disabled={setCameraFront === null}
+              title="Front view (elevation)"
+            >
+              Front
+            </button>
+            <button
+              className={`panel-action-btn${wireframeActive ? ' active' : ''}`}
+              onClick={handleWireframe}
+              disabled={setWireframe === null}
+              title={wireframeActive ? 'Disable wireframe' : 'Enable wireframe'}
+            >
+              Wireframe
+            </button>
           </div>
         </div>
         <div className="panel-body" style={{ flexDirection: 'column' }}>
@@ -7979,7 +8671,7 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Right: Inspector | Object Tree | Zones | Existing Zones */}
+        {/* Right: Inspector | Object Tree | Zones | Existing Zones | Activities */}
         <div className="panel" style={{ borderRight: 'none' }}>
           <div className="panel-header">
             <div className="panel-tabs">
@@ -8006,9 +8698,8 @@ export default function Layout() {
               </button>
 
               {/*
-                New tab — dedicated to managing, assigning, filtering existing zones.
-                Badge shows active filter count so users know filters are on even
-                when viewing a different tab.
+                Existing Zones tab — badge shows active filter count so users
+                know filters are on even when viewing a different tab.
               */}
               <button
                 className={`panel-tab${rightTab === 'existing-zones' ? ' panel-tab--active' : ''}`}
@@ -8017,6 +8708,21 @@ export default function Layout() {
                 Existing Zones
                 {activeFilterIds.length > 0 && (
                   <span className="panel-tab__badge">{activeFilterIds.length}</span>
+                )}
+              </button>
+
+              {/*
+                Activities tab — Phase 4 addition.
+                Badge shows total activity count so users always know how
+                many activities are in the schedule.
+              */}
+              <button
+                className={`panel-tab${rightTab === 'activities' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('activities')}
+              >
+                Activities
+                {activityCount > 0 && (
+                  <span className="panel-tab__badge">{activityCount}</span>
                 )}
               </button>
 
@@ -8045,9 +8751,14 @@ export default function Layout() {
                 <ZonePanel />
               </ErrorBoundary>
 
-            ) : (
+            ) : rightTab === 'existing-zones' ? (
               <ErrorBoundary context="Existing Zones Panel">
                 <ExistingZonesPanel />
+              </ErrorBoundary>
+
+            ) : (
+              <ErrorBoundary context="Activities Panel">
+                <ActivityPanel />
               </ErrorBoundary>
             )}
 
@@ -10131,6 +10842,32 @@ export interface AssignmentRow {
   readonly assigned_at: string
 }
 
+/**
+ * Raw row from the `activities` table.
+ */
+export interface ActivityRow {
+  readonly id:           string
+  readonly name:         string
+  readonly start_date:   string
+  readonly end_date:     string
+  readonly progress:     number
+  readonly color:        string
+  readonly parent_id:    string | null
+  readonly dependencies: string[]
+  readonly created_at:   string
+  readonly updated_at:   string
+}
+
+/**
+ * Raw row from the `activity_object_links` table.
+ */
+export interface ActivityLinkRow {
+  readonly id:          string
+  readonly activity_id: string
+  readonly global_id:   string
+  readonly linked_at:   string
+}
+
 
 ====================================================================================================
 FILE: src\features\viewer\IFCUploadZone.tsx
@@ -10318,6 +11055,180 @@ export default function IFCUploadZone({ viewerEngine }: IFCUploadZoneProps) {
       </p>
     </div>
   )
+}
+
+
+====================================================================================================
+FILE: src\hooks\useActivities.ts
+====================================================================================================
+
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type UseQueryResult,
+  type UseMutationResult,
+} from '@tanstack/react-query'
+import { useEffect }        from 'react'
+import { useActivityStore } from '../store/activity.store'
+import { useViewerStore }   from '../store/viewer.store'
+import {
+  getActivities,
+  getActivityById,
+  createActivity,
+  updateActivity,
+  deleteActivity,
+  buildGlobalIdToActivityIdsMap,
+} from '../services/api/activities.api'
+import type { Activity, CreateActivityPayload, UpdateActivityPayload } from '../types'
+
+// ── Query keys ────────────────────────────────────────────────────────────────
+
+export const activityKeys = {
+  all:         ['activities']                      as const,
+  detail:      (id: string) => ['activities', id]  as const,
+  globalIdMap: ['activities', 'globalIdMap']       as const,
+}
+
+// ── useActivities ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetches all activities and syncs them into the activity store.
+ * Mirrors the pattern of useLayers() — React Query is the source of truth,
+ * Zustand is the synchronised local cache consumed by components.
+ */
+export function useActivities(): UseQueryResult<Activity[]> {
+  const setActivities = useActivityStore(s => s.setActivities)
+
+  const query = useQuery<Activity[]>({
+    queryKey: activityKeys.all,
+    queryFn:  getActivities,
+    // Always consider data fresh for 30 seconds; re-fetch in background after
+    staleTime: 30_000,
+  })
+
+  // Sync into Zustand on every successful fetch
+  useEffect(() => {
+    if (query.data) {
+      setActivities(query.data)
+    }
+  }, [query.data, setActivities])
+
+  return query
+}
+
+// ── useActivityById ───────────────────────────────────────────────────────────
+
+/**
+ * Fetches a single activity by ID.
+ * Used by modals / detail views that need fresh data.
+ */
+export function useActivityById(id: string): UseQueryResult<Activity | null> {
+  return useQuery<Activity | null>({
+    queryKey: activityKeys.detail(id),
+    queryFn:  () => getActivityById(id),
+    enabled:  id.length > 0,
+  })
+}
+
+// ── useGlobalIdActivityMap ────────────────────────────────────────────────────
+
+/**
+ * Fetches the full globalId → activityIds[] map and syncs IFCObject.activityIds
+ * in the viewer store, so SelectionStore and Simulation work against live DB data.
+ *
+ * This is the primary bridge between DB activity links and the viewer.
+ */
+export function useGlobalIdActivityMap(): UseQueryResult<Map<string, string[]>> {
+  const setIFCObjects = useViewerStore(s => s.setIFCObjects)
+  const ifcObjects    = useViewerStore(s => s.ifcObjects)
+
+  const query = useQuery<Map<string, string[]>>({
+    queryKey: activityKeys.globalIdMap,
+    queryFn:  buildGlobalIdToActivityIdsMap,
+    enabled:  ifcObjects.length > 0,
+    staleTime: 30_000,
+  })
+
+  // Patch IFCObject.activityIds whenever the map refreshes
+  useEffect(() => {
+    if (!query.data || ifcObjects.length === 0) return
+
+    const map = query.data
+    const patched = ifcObjects.map(obj => ({
+      ...obj,
+      activityIds: map.get(obj.globalId) ?? [],
+    }))
+
+    setIFCObjects(patched)
+  }, [query.data, ifcObjects.length, setIFCObjects]) // intentionally omit `ifcObjects` ref
+
+  return query
+}
+
+// ── useCreateActivity ─────────────────────────────────────────────────────────
+
+/**
+ * Mutation hook for creating a new activity.
+ * Invalidates the activities query on success so the list refreshes.
+ */
+export function useCreateActivity(): UseMutationResult<
+  Activity,
+  Error,
+  CreateActivityPayload
+> {
+  const queryClient = useQueryClient()
+
+  return useMutation<Activity, Error, CreateActivityPayload>({
+    mutationFn: (payload) => createActivity(payload),
+
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: activityKeys.all })
+      void queryClient.invalidateQueries({ queryKey: activityKeys.globalIdMap })
+    },
+  })
+}
+
+// ── useUpdateActivity ─────────────────────────────────────────────────────────
+
+/**
+ * Mutation hook for updating an existing activity.
+ */
+export function useUpdateActivity(): UseMutationResult<
+  Activity | null,
+  Error,
+  UpdateActivityPayload
+> {
+  const queryClient = useQueryClient()
+
+  return useMutation<Activity | null, Error, UpdateActivityPayload>({
+    mutationFn: (payload) => updateActivity(payload),
+
+    onSuccess: (_result, payload) => {
+      void queryClient.invalidateQueries({ queryKey: activityKeys.all })
+      void queryClient.invalidateQueries({ queryKey: activityKeys.detail(payload.id) })
+      void queryClient.invalidateQueries({ queryKey: activityKeys.globalIdMap })
+    },
+  })
+}
+
+// ── useDeleteActivity ─────────────────────────────────────────────────────────
+
+/**
+ * Mutation hook for deleting an activity.
+ */
+export function useDeleteActivity(): UseMutationResult<boolean, Error, string> {
+  const queryClient = useQueryClient()
+
+  return useMutation<boolean, Error, string>({
+    mutationFn: (id) => deleteActivity(id),
+
+    onSuccess: (_result, id) => {
+      void queryClient.invalidateQueries({ queryKey: activityKeys.all })
+      void queryClient.invalidateQueries({ queryKey: activityKeys.detail(id) })
+      void queryClient.invalidateQueries({ queryKey: activityKeys.globalIdMap })
+    },
+  })
 }
 
 
@@ -10784,6 +11695,282 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </QueryProvider>
   </React.StrictMode>
 )
+
+
+====================================================================================================
+FILE: src\services\api\activities.api.ts
+====================================================================================================
+
+import { sql }                  from '../../database/client'
+import type { ActivityRow, ActivityLinkRow } from '../../database/types'
+import type { Activity, CreateActivityPayload, UpdateActivityPayload } from '../../types'
+
+// ── Row → Domain mapper ──────────────────────────────────────────────────────
+
+/**
+ * Converts a raw DB row into the Activity domain type.
+ * linkedGlobalIds is populated separately via a join or second query.
+ */
+function rowToActivity(row: ActivityRow, linkedGlobalIds: string[] = []): Activity {
+  return {
+    id:              row.id,
+    name:            row.name,
+    startDate:       row.start_date,
+    endDate:         row.end_date,
+    color:           row.color,
+    linkedGlobalIds,
+    dependencies:    Array.isArray(row.dependencies)
+      ? row.dependencies.map(String)
+      : [],
+    createdAt:       row.created_at,
+    updatedAt:       row.updated_at,
+  }
+}
+
+// ── getActivities ────────────────────────────────────────────────────────────
+
+/**
+ * Fetches all activities with their linked IFC GlobalIds in a single query.
+ * Activities are ordered by start_date ascending (schedule order).
+ */
+export async function getActivities(): Promise<Activity[]> {
+  // Fetch all activities
+  const rows = await sql<ActivityRow>`
+    SELECT id, name, start_date, end_date, progress, color,
+           parent_id, dependencies, created_at, updated_at
+    FROM   activities
+    ORDER  BY start_date ASC, created_at ASC
+  `
+
+  if (rows.length === 0) return []
+
+  // Fetch all links in one query
+  const activityIds = rows.map(r => r.id)
+  const linkRows = await sql<ActivityLinkRow>`
+    SELECT activity_id, global_id
+    FROM   activity_object_links
+    WHERE  activity_id = ANY(${activityIds}::uuid[])
+    ORDER  BY activity_id, linked_at ASC
+  `
+
+  // Build a map of activityId → globalIds[]
+  const linkMap = new Map<string, string[]>()
+  for (const link of linkRows) {
+    const existing = linkMap.get(link.activity_id) ?? []
+    existing.push(link.global_id)
+    linkMap.set(link.activity_id, existing)
+  }
+
+  return rows.map(row => rowToActivity(row, linkMap.get(row.id) ?? []))
+}
+
+// ── getActivityById ──────────────────────────────────────────────────────────
+
+/**
+ * Fetches a single activity by ID, including its linked GlobalIds.
+ * Returns null if not found.
+ */
+export async function getActivityById(id: string): Promise<Activity | null> {
+  const rows = await sql<ActivityRow>`
+    SELECT id, name, start_date, end_date, progress, color,
+           parent_id, dependencies, created_at, updated_at
+    FROM   activities
+    WHERE  id = ${id}
+    LIMIT  1
+  `
+
+  if (rows.length === 0) return null
+
+  const linkRows = await sql<ActivityLinkRow>`
+    SELECT global_id
+    FROM   activity_object_links
+    WHERE  activity_id = ${id}
+    ORDER  BY linked_at ASC
+  `
+
+  const linkedGlobalIds = linkRows.map(r => r.global_id)
+  return rowToActivity(rows[0], linkedGlobalIds)
+}
+
+// ── createActivity ───────────────────────────────────────────────────────────
+
+/**
+ * Creates a new activity and its linked IFC GlobalIds.
+ * Returns the created activity with server-generated id and timestamps.
+ */
+export async function createActivity(
+  payload: CreateActivityPayload
+): Promise<Activity> {
+  // Insert the activity row — dates are passed as ISO strings; Postgres casts them.
+  const rows = await sql<ActivityRow>`
+    INSERT INTO activities (name, start_date, end_date, color, dependencies)
+    VALUES (
+      ${payload.name},
+      ${payload.startDate},
+      ${payload.endDate},
+      ${payload.color},
+      ${payload.dependencies.length > 0 ? payload.dependencies : []}::uuid[]
+    )
+    RETURNING id, name, start_date, end_date, progress, color,
+              parent_id, dependencies, created_at, updated_at
+  `
+
+  if (rows.length === 0) {
+    throw new Error('[activities.api] INSERT returned no rows')
+  }
+
+  const newId = rows[0].id
+
+  // Insert links
+  let linkedGlobalIds: string[] = []
+  if (payload.linkedGlobalIds.length > 0) {
+    await sql`
+      INSERT INTO activity_object_links (activity_id, global_id)
+      SELECT ${newId}::uuid, unnest(${payload.linkedGlobalIds}::text[])
+      ON CONFLICT (activity_id, global_id) DO NOTHING
+    `
+    linkedGlobalIds = [...payload.linkedGlobalIds]
+  }
+
+  return rowToActivity(rows[0], linkedGlobalIds)
+}
+
+// ── updateActivity ───────────────────────────────────────────────────────────
+
+/**
+ * Updates an existing activity and optionally replaces its linked GlobalIds.
+ * Returns the updated activity, or null if not found.
+ *
+ * Uses explicit field updates — only non-null payload fields are applied.
+ * Dates are passed as ISO strings; PostgreSQL coerces them to DATE type.
+ */
+export async function updateActivity(
+  payload: UpdateActivityPayload
+): Promise<Activity | null> {
+  const { id, ...fields } = payload
+
+  // Always update updated_at; apply other fields only when provided.
+  // We use COALESCE with explicit parameter passing for type safety.
+  const rows = await sql<ActivityRow>`
+    UPDATE activities
+    SET
+      name         = COALESCE(${fields.name         ?? null}, name),
+      start_date   = COALESCE(${fields.startDate    ?? null}::date, start_date),
+      end_date     = COALESCE(${fields.endDate      ?? null}::date, end_date),
+      color        = COALESCE(${fields.color        ?? null}, color),
+      dependencies = COALESCE(
+        ${fields.dependencies != null ? fields.dependencies : null}::uuid[],
+        dependencies
+      )
+    WHERE id = ${id}
+    RETURNING id, name, start_date, end_date, progress, color,
+              parent_id, dependencies, created_at, updated_at
+  `
+
+  if (rows.length === 0) return null
+
+  // Replace linked GlobalIds if provided
+  if (fields.linkedGlobalIds !== undefined) {
+    // Delete all existing links for this activity
+    await sql`
+      DELETE FROM activity_object_links
+      WHERE  activity_id = ${id}
+    `
+    // Insert new links
+    if (fields.linkedGlobalIds.length > 0) {
+      await sql`
+        INSERT INTO activity_object_links (activity_id, global_id)
+        SELECT ${id}::uuid, unnest(${fields.linkedGlobalIds}::text[])
+        ON CONFLICT (activity_id, global_id) DO NOTHING
+      `
+    }
+
+    return rowToActivity(rows[0], fields.linkedGlobalIds)
+  }
+
+  // Fetch current links unchanged
+  const linkRows = await sql<ActivityLinkRow>`
+    SELECT global_id
+    FROM   activity_object_links
+    WHERE  activity_id = ${id}
+    ORDER  BY linked_at ASC
+  `
+  return rowToActivity(rows[0], linkRows.map(r => r.global_id))
+}
+
+// ── deleteActivity ───────────────────────────────────────────────────────────
+
+/**
+ * Deletes an activity and all its object links (CASCADE handles the links).
+ * Returns true if deleted, false if not found.
+ */
+export async function deleteActivity(id: string): Promise<boolean> {
+  const rows = await sql<{ id: string }>`
+    DELETE FROM activities
+    WHERE  id = ${id}
+    RETURNING id
+  `
+  return rows.length > 0
+}
+
+// ── linkObjectsToActivity ─────────────────────────────────────────────────────
+
+/**
+ * Assigns one or more IFC GlobalIds to an activity.
+ * Uses ON CONFLICT DO NOTHING — safe to call repeatedly.
+ */
+export async function linkObjectsToActivity(
+  activityId: string,
+  globalIds:  string[]
+): Promise<void> {
+  if (globalIds.length === 0) return
+
+  await sql`
+    INSERT INTO activity_object_links (activity_id, global_id)
+    SELECT ${activityId}::uuid, unnest(${globalIds}::text[])
+    ON CONFLICT (activity_id, global_id) DO NOTHING
+  `
+}
+
+// ── unlinkObjectFromActivity ──────────────────────────────────────────────────
+
+/**
+ * Removes a specific IFC GlobalId from an activity.
+ * Returns the number of rows deleted (0 or 1).
+ */
+export async function unlinkObjectFromActivity(
+  activityId: string,
+  globalId:   string
+): Promise<number> {
+  const rows = await sql<{ id: string }>`
+    DELETE FROM activity_object_links
+    WHERE  activity_id = ${activityId}
+    AND    global_id   = ${globalId}
+    RETURNING id
+  `
+  return rows.length
+}
+
+// ── buildGlobalIdToActivityIdsMap ─────────────────────────────────────────────
+
+/**
+ * Returns a map of globalId → activityIds[] for ALL links.
+ * Used to seed IFCObject.activityIds in the viewer store.
+ */
+export async function buildGlobalIdToActivityIdsMap(): Promise<Map<string, string[]>> {
+  const rows = await sql<{ global_id: string; activity_id: string }>`
+    SELECT global_id, activity_id
+    FROM   activity_object_links
+    ORDER  BY global_id
+  `
+  const map = new Map<string, string[]>()
+  for (const row of rows) {
+    const existing = map.get(row.global_id) ?? []
+    existing.push(row.activity_id)
+    map.set(row.global_id, existing)
+  }
+  return map
+}
 
 
 ====================================================================================================
@@ -11302,64 +12489,51 @@ export class IFCUploadService {
 FILE: src\store\activity.store.ts
 ====================================================================================================
 
-/**
- * Activity store — owns construction schedule state.
- *
- * Phase 1: seeded with mock data.
- * Phase 4: will be replaced by React Query + Neon API.
- */
-
-import { create } from 'zustand'
-import { ActivityLinker } from '../core/ifc/ActivityLinker'
+import { create }            from 'zustand'
+import { ActivityLinker }    from '../core/ifc/ActivityLinker'
 import type { Activity, CreateActivityPayload, UpdateActivityPayload } from '../types'
-import type { LinkMap } from '../core/ifc/ActivityLinker'
-
-/** Mock activities — replaced by DB data in Phase 4 */
-const MOCK_ACTIVITIES: Activity[] = [
-  {
-    id: 'task-1', name: 'Foundation Works',
-    startDate: '2024-01-01', endDate: '2024-02-28',
-    color: '#E67E22', linkedGlobalIds: ['A1','A2','A3'],
-    dependencies: [], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'task-2', name: 'Structural Frame',
-    startDate: '2024-02-15', endDate: '2024-04-30',
-    color: '#3498DB', linkedGlobalIds: ['A4','A5','A6'],
-    dependencies: ['task-1'], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'task-3', name: 'Facade & Slabs',
-    startDate: '2024-04-01', endDate: '2024-06-30',
-    color: '#9B59B6', linkedGlobalIds: ['A7','A8'],
-    dependencies: ['task-2'], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'task-4', name: 'MEP Installation',
-    startDate: '2024-05-15', endDate: '2024-08-31',
-    color: '#1ABC9C', linkedGlobalIds: ['A9','A10'],
-    dependencies: ['task-2'], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'task-5', name: 'Finishes',
-    startDate: '2024-08-01', endDate: '2024-11-30',
-    color: '#E74C3C', linkedGlobalIds: ['A11','A12'],
-    dependencies: ['task-4'], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-]
+import type { LinkMap }      from '../core/ifc/ActivityLinker'
 
 interface ActivityState {
+  /** All activities loaded from the database */
   activities: Activity[]
-  /** Pre-computed bidirectional link map */
+  /** Pre-computed bidirectional link map for O(1) lookups */
   linkMap:    LinkMap
+  /** Whether the initial DB fetch has completed */
+  isLoaded:   boolean
 
   // ── Actions ──────────────────────────────────────────────
-  setActivities:    (activities: Activity[]) => void
-  addActivity:      (payload: CreateActivityPayload) => void
-  updateActivity:   (payload: UpdateActivityPayload) => void
-  deleteActivity:   (id: string) => void
-  getActivityById:  (id: string) => Activity | undefined
+
+  /**
+   * Called by useActivities() hook after a successful DB fetch.
+   * Replaces the current in-memory list and rebuilds the link map.
+   */
+  setActivities: (activities: Activity[]) => void
+
+  /**
+   * Optimistic local add — used by useCreateActivity mutation's onMutate.
+   * The real data arrives via setActivities() after cache invalidation.
+   */
+  addActivity: (payload: CreateActivityPayload) => void
+
+  /**
+   * Optimistic local update — used by useUpdateActivity mutation's onMutate.
+   */
+  updateActivity: (payload: UpdateActivityPayload) => void
+
+  /**
+   * Optimistic local delete — used by useDeleteActivity mutation's onMutate.
+   */
+  deleteActivity: (id: string) => void
+
+  /** Selector: returns an activity by ID, or undefined */
+  getActivityById: (id: string) => Activity | undefined
+
+  /** Selector: returns all activities linked to an IFC object */
   getActivitiesForObject: (globalId: string) => Activity[]
+
+  /** Selector: returns all IFC GlobalIds linked to an activity */
+  getObjectsForActivity: (activityId: string) => string[]
 }
 
 function buildLinkMap(activities: Activity[]): LinkMap {
@@ -11367,20 +12541,22 @@ function buildLinkMap(activities: Activity[]): LinkMap {
 }
 
 export const useActivityStore = create<ActivityState>((set, get) => ({
-  activities: MOCK_ACTIVITIES,
-  linkMap:    buildLinkMap(MOCK_ACTIVITIES),
+  activities: [],
+  linkMap:    buildLinkMap([]),
+  isLoaded:   false,
 
   setActivities: (activities) =>
-    set({ activities, linkMap: buildLinkMap(activities) }),
+    set({ activities, linkMap: buildLinkMap(activities), isLoaded: true }),
 
   addActivity: (payload) => {
-    const newActivity: Activity = {
+    // Generate a temporary ID — overwritten when the real data arrives
+    const tempActivity: Activity = {
       ...payload,
-      id:        `task-${Date.now()}`,
+      id:        `temp-${Date.now()}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
-    const next = [...get().activities, newActivity]
+    const next = [...get().activities, tempActivity]
     set({ activities: next, linkMap: buildLinkMap(next) })
   },
 
@@ -11407,6 +12583,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       .map(id => get().activities.find(a => a.id === id))
       .filter((a): a is Activity => a !== undefined)
   },
+
+  getObjectsForActivity: (activityId) =>
+    ActivityLinker.getObjectsForActivity(activityId, get().linkMap),
 }))
 
 
@@ -11779,8 +12958,14 @@ interface ViewerState {
   modelFileSize:    number | null
   /** Whether the Three.js scene is initialized */
   sceneReady:       boolean
-  /** Current render mode */
+  /** Current render mode / active camera view */
   renderMode:       RenderMode
+  /**
+   * Whether wireframe is currently enabled.
+   * Tracked separately from renderMode so that wireframe can be
+   * toggled independently of the active camera view.
+   */
+  wireframeActive:  boolean
 
   /**
    * Engine action: zoom the camera to fit a single IFC object.
@@ -11799,6 +12984,30 @@ interface ViewerState {
    */
   isolateObjects:   ((globalIds: string[]) => void) | null
 
+  /**
+   * Engine action: switch to perspective view.
+   * Registered by IFCViewer in onSceneReady. null until engine is mounted.
+   */
+  setCameraPerspective: (() => void) | null
+
+  /**
+   * Engine action: switch to top (plan) view.
+   * Registered by IFCViewer in onSceneReady. null until engine is mounted.
+   */
+  setCameraTop: (() => void) | null
+
+  /**
+   * Engine action: switch to front (elevation) view.
+   * Registered by IFCViewer in onSceneReady. null until engine is mounted.
+   */
+  setCameraFront: (() => void) | null
+
+  /**
+   * Engine action: toggle wireframe rendering.
+   * Registered by IFCViewer in onSceneReady. null until engine is mounted.
+   */
+  setWireframe: ((enabled: boolean) => void) | null
+
   // ── Actions ──────────────────────────────────────────────
   setIFCObjects:       (objects: IFCObject[]) => void
   setSpatialTree:      (tree: IFCSpatialTree | null) => void
@@ -11807,9 +13016,21 @@ interface ViewerState {
   setModelMeta:        (fileName: string, fileSize: number) => void
   setSceneReady:       (ready: boolean) => void
   setRenderMode:       (mode: RenderMode) => void
+  setWireframeActive:  (active: boolean) => void
   setEngineActions:    (
     zoom: (globalId: string) => void,
     isolate: (globalIds: string[]) => void
+  ) => void
+  /**
+   * Registers the camera view + wireframe callbacks from the live ViewerEngine.
+   * Called inside IFCViewer's onSceneReady, alongside setEngineActions.
+   * Persists across model loads — cleared only on engine disposal.
+   */
+  setCameraActions: (
+    perspective: () => void,
+    top:         () => void,
+    front:       () => void,
+    wireframe:   (enabled: boolean) => void
   ) => void
   clearEngineActions:  () => void
   resetModel:          () => void
@@ -11817,16 +13038,21 @@ interface ViewerState {
 }
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
-  ifcObjects:      [],
-  spatialTree:     null,
-  modelLoadState:  'idle',
-  modelError:      null,
-  modelFileName:   null,
-  modelFileSize:   null,
-  sceneReady:      false,
-  renderMode:      'perspective',
-  zoomToObject:    null,
-  isolateObjects:  null,
+  ifcObjects:           [],
+  spatialTree:          null,
+  modelLoadState:       'idle',
+  modelError:           null,
+  modelFileName:        null,
+  modelFileSize:        null,
+  sceneReady:           false,
+  renderMode:           'perspective',
+  wireframeActive:      false,
+  zoomToObject:         null,
+  isolateObjects:       null,
+  setCameraPerspective: null,
+  setCameraTop:         null,
+  setCameraFront:       null,
+  setWireframe:         null,
 
   setIFCObjects:     (objects) => set({ ifcObjects: objects }),
   setSpatialTree:    (tree)    => set({ spatialTree: tree }),
@@ -11835,20 +13061,32 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setModelMeta:      (fileName, fileSize) => set({ modelFileName: fileName, modelFileSize: fileSize }),
   setSceneReady:     (ready)   => set({ sceneReady: ready }),
   setRenderMode:     (mode)    => set({ renderMode: mode }),
+  setWireframeActive:(active)  => set({ wireframeActive: active }),
 
   setEngineActions: (zoom, isolate) => set({
     zoomToObject:   zoom,
     isolateObjects: isolate,
   }),
 
+  setCameraActions: (perspective, top, front, wireframe) => set({
+    setCameraPerspective: perspective,
+    setCameraTop:         top,
+    setCameraFront:       front,
+    setWireframe:         wireframe,
+  }),
+
   clearEngineActions: () => set({
-    zoomToObject:   null,
-    isolateObjects: null,
+    zoomToObject:         null,
+    isolateObjects:       null,
+    setCameraPerspective: null,
+    setCameraTop:         null,
+    setCameraFront:       null,
+    setWireframe:         null,
   }),
 
   // ── FIX: resetModel resets only MODEL data and load state. ──────────────
   //
-  // It must NOT null zoomToObject / isolateObjects.
+  // It must NOT null zoomToObject / isolateObjects / camera actions.
   //
   // Root cause of the bug:
   //   The "Load New Model" button in Layout.tsx calls resetModel() before the
@@ -11859,32 +13097,568 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   //   Result: Zoom / Isolate buttons remained permanently disabled for every
   //   model loaded after the first.
   //
-  // Engine action callbacks (zoomToObject / isolateObjects) are closures that
-  // reference the live ViewerEngine via engineRef.current.  The ViewerEngine
-  // instance is created once at IFCViewer mount and persists across model
-  // loads.  The callbacks remain valid as long as the engine is alive.
+  // Engine action callbacks are closures that reference the live ViewerEngine
+  // via engineRef.current.  The ViewerEngine instance is created once at
+  // IFCViewer mount and persists across model loads.  The callbacks remain
+  // valid as long as the engine is alive.
   //
   // Responsibility split:
   //   • resetModel()        — clears MODEL data only (objects, tree, state,
-  //                           meta).  Never touches engine action callbacks.
+  //                           meta, renderMode, wireframeActive).
+  //                           Never touches engine action callbacks.
   //   • clearEngineActions() — called only in the IFCViewer mount-effect
   //                            cleanup (i.e. on engine disposal / unmount).
   //                            This is the only correct place to null them.
   //
   resetModel: () => set({
-    ifcObjects:     [],
-    spatialTree:    null,
-    modelLoadState: 'idle',
-    modelError:     null,
-    modelFileName:  null,
-    modelFileSize:  null,
-    // zoomToObject  and isolateObjects are intentionally NOT reset here.
-    // See comment above.
+    ifcObjects:      [],
+    spatialTree:     null,
+    modelLoadState:  'idle',
+    modelError:      null,
+    modelFileName:   null,
+    modelFileSize:   null,
+    renderMode:      'perspective',
+    wireframeActive: false,
+    // zoomToObject, isolateObjects, and all camera actions are intentionally
+    // NOT reset here — see comment above.
   }),
 
   getObjectByGlobalId: (globalId) =>
     get().ifcObjects.find(o => o.globalId === globalId),
 }))
+
+
+====================================================================================================
+FILE: src\styles\activities.css
+====================================================================================================
+
+/* ── ActivityPanel ────────────────────────────────────────────── */
+
+.act-panel {
+  display:        flex;
+  flex-direction: column;
+  height:         100%;
+  overflow:       hidden;
+}
+
+/* ── Panel header ─────────────────────────────────────────────── */
+
+.act-panel__header {
+  align-items:     center;
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  flex-shrink:     0;
+  gap:             8px;
+  padding:         10px 14px 8px;
+}
+
+.act-panel__title {
+  color:          var(--text-secondary);
+  font-size:      11px;
+  font-weight:    700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.act-panel__count {
+  background:    rgba(47, 107, 255, 0.15);
+  border:        1px solid rgba(47, 107, 255, 0.3);
+  border-radius: 8px;
+  color:         var(--accent-blue);
+  font-size:     9px;
+  font-weight:   700;
+  min-width:     16px;
+  padding:       1px 5px;
+  text-align:    center;
+}
+
+.act-panel__new-btn {
+  background:    rgba(47, 107, 255, 0.12);
+  border:        1px solid rgba(47, 107, 255, 0.3);
+  border-radius: 6px;
+  color:         var(--accent-blue);
+  cursor:        pointer;
+  font-size:     11px;
+  font-weight:   600;
+  margin-left:   auto;
+  padding:       4px 10px;
+  transition:    all 0.15s;
+  white-space:   nowrap;
+}
+.act-panel__new-btn:hover { background: rgba(47, 107, 255, 0.22); }
+.act-panel__new-btn--active {
+  background:   rgba(231, 76, 60, 0.12);
+  border-color: rgba(231, 76, 60, 0.3);
+  color:        #e74c3c;
+}
+.act-panel__new-btn--active:hover { background: rgba(231, 76, 60, 0.22); }
+
+/* ── Form wrapper ─────────────────────────────────────────────── */
+
+.act-panel__form-wrap {
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink:   0;
+}
+
+/* ── Activity list ────────────────────────────────────────────── */
+
+.act-panel__list {
+  flex:       1;
+  min-height: 0;
+  overflow-y: auto;
+  padding:    6px 0;
+  scrollbar-width:       thin;
+  scrollbar-color:       var(--border-color) transparent;
+}
+.act-panel__list::-webkit-scrollbar       { width: 4px; }
+.act-panel__list::-webkit-scrollbar-track  { background: transparent; }
+.act-panel__list::-webkit-scrollbar-thumb  {
+  background:    var(--border-color);
+  border-radius: 2px;
+}
+
+/* ── Panel states ─────────────────────────────────────────────── */
+
+.act-panel__state {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   12px;
+  gap:         8px;
+  padding:     16px 14px;
+}
+
+.act-panel__spinner {
+  animation:     spin 0.8s linear infinite;
+  border:        2px solid var(--border-color);
+  border-radius: 50%;
+  border-top:    2px solid var(--accent-blue);
+  flex-shrink:   0;
+  height:        16px;
+  width:         16px;
+}
+
+.act-panel__error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+}
+
+.act-panel__empty {
+  padding:    32px 20px;
+  text-align: center;
+}
+
+.act-panel__empty-icon {
+  font-size:     28px;
+  margin-bottom: 10px;
+}
+
+.act-panel__empty-title {
+  color:         var(--text-primary);
+  font-size:     13px;
+  font-weight:   600;
+  margin-bottom: 6px;
+}
+
+.act-panel__empty-hint {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  line-height: 1.5;
+}
+.act-panel__empty-hint strong { color: var(--text-primary); }
+
+/* ── ActivityCard ─────────────────────────────────────────────── */
+
+.act-card {
+  align-items:     center;
+  border-bottom:   1px solid rgba(255, 255, 255, 0.04);
+  cursor:          pointer;
+  display:         flex;
+  gap:             10px;
+  padding:         8px 12px 8px 0;
+  transition:      background 0.1s;
+}
+.act-card:hover         { background: rgba(255, 255, 255, 0.04); }
+.act-card--selected {
+  background:    rgba(47, 107, 255, 0.08);
+  border-left:   2px solid var(--accent-blue);
+  padding-left:  0;
+}
+
+.act-card__stripe {
+  border-radius: 0 3px 3px 0;
+  flex-shrink:   0;
+  height:        42px;
+  width:         4px;
+}
+/* shift stripe left when selected (border-left takes 2px) */
+.act-card--selected .act-card__stripe {
+  margin-left: -2px;
+}
+/* add consistent left indent for non-selected cards */
+.act-card:not(.act-card--selected) .act-card__stripe {
+  margin-left: 8px;
+}
+
+.act-card__body {
+  display:        flex;
+  flex:           1;
+  flex-direction: column;
+  gap:            2px;
+  min-width:      0;
+}
+
+.act-card__name {
+  color:         var(--text-primary);
+  font-size:     12px;
+  font-weight:   600;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.act-card__dates {
+  color:     var(--text-secondary);
+  font-size: 10px;
+}
+
+.act-card__duration {
+  color:   var(--text-secondary);
+  opacity: 0.7;
+}
+
+.act-card__meta {
+  display:   flex;
+  gap:       6px;
+  margin-top: 1px;
+}
+
+.act-card__link-badge {
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid var(--border-color);
+  border-radius: 8px;
+  color:         var(--text-secondary);
+  font-size:     9px;
+  padding:       1px 5px;
+}
+
+.act-card__edit-btn {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  flex-shrink: 0;
+  font-size:   12px;
+  line-height: 1;
+  opacity:     0;
+  padding:     4px 6px;
+  transition:  opacity 0.1s, color 0.1s;
+}
+.act-card:hover .act-card__edit-btn { opacity: 1; }
+.act-card__edit-btn:hover            { color: var(--text-primary); }
+
+/* ── ActivityForm ─────────────────────────────────────────────── */
+
+.act-form {
+  display:        flex;
+  flex-direction: column;
+}
+
+.act-form__header {
+  align-items:     center;
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  justify-content: space-between;
+  padding:         9px 14px 7px;
+}
+
+.act-form__title {
+  color:       var(--text-primary);
+  font-size:   12px;
+  font-weight: 600;
+}
+
+.act-form__close {
+  background:  transparent;
+  border:      none;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  font-size:   12px;
+  line-height: 1;
+  padding:     2px 4px;
+  transition:  color 0.1s;
+}
+.act-form__close:hover   { color: var(--text-primary); }
+.act-form__close:disabled { cursor: default; opacity: 0.4; }
+
+.act-form__body {
+  display:        flex;
+  flex-direction: column;
+  gap:            8px;
+  padding:        10px 14px;
+}
+
+.act-form__field {
+  display:        flex;
+  flex-direction: column;
+  gap:            4px;
+}
+
+.act-form__label {
+  color:          var(--text-secondary);
+  font-size:      10px;
+  font-weight:    600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.act-form__name-row {
+  display: flex;
+  gap:     6px;
+}
+
+.act-form__input {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid var(--border-color);
+  border-radius: 6px;
+  color:         var(--text-primary);
+  flex:          1;
+  font-size:     12px;
+  outline:       none;
+  padding:       6px 10px;
+  transition:    border-color 0.15s;
+  width:         100%;
+}
+.act-form__input:focus          { border-color: var(--accent-blue); }
+.act-form__input:disabled       { cursor: default; opacity: 0.5; }
+.act-form__input--error         { border-color: #e74c3c; }
+.act-form__input--date          { font-size: 11px; }
+
+.act-form__color {
+  background:    transparent;
+  border:        1px solid var(--border-color);
+  border-radius: 5px;
+  cursor:        pointer;
+  height:        34px;
+  padding:       2px;
+  transition:    border-color 0.15s;
+  width:         36px;
+}
+.act-form__color:disabled { cursor: default; opacity: 0.5; }
+
+.act-form__dates {
+  display: flex;
+  gap:     8px;
+}
+.act-form__dates > .act-form__field { flex: 1; }
+
+.act-form__color-preview {
+  border-radius: 4px;
+  flex-shrink:   0;
+  height:        4px;
+  transition:    background 0.2s;
+  width:         100%;
+}
+
+.act-form__field-error {
+  color:     #e74c3c;
+  font-size: 10px;
+}
+
+.act-form__submit {
+  align-items:   center;
+  background:    var(--accent-blue);
+  border:        none;
+  border-radius: 6px;
+  color:         #fff;
+  cursor:        pointer;
+  font-size:     12px;
+  font-weight:   600;
+  padding:       8px 16px;
+  transition:    background 0.15s, opacity 0.15s, transform 0.1s;
+}
+.act-form__submit:hover:not(:disabled) {
+  background: #1a5ce8;
+  transform:  translateY(-1px);
+}
+.act-form__submit:active:not(:disabled) { transform: none; }
+.act-form__submit:disabled { cursor: default; opacity: 0.35; }
+
+.act-form__success {
+  background:    rgba(46, 204, 113, 0.1);
+  border:        1px solid rgba(46, 204, 113, 0.25);
+  border-radius: 5px;
+  color:         var(--accent-green);
+  font-size:     11px;
+  font-weight:   500;
+  padding:       5px 8px;
+}
+
+.act-form__error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  font-size:     10px;
+  padding:       5px 8px;
+}
+
+/* ── Delete zone ──────────────────────────────────────────────── */
+
+.act-form__delete-zone {
+  border-top: 1px solid var(--border-color);
+  padding:    10px 14px;
+}
+
+.act-form__delete-btn {
+  background:    rgba(231, 76, 60, 0.08);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 5px;
+  color:         #e74c3c;
+  cursor:        pointer;
+  font-size:     11px;
+  padding:       5px 10px;
+  transition:    background 0.12s;
+  width:         100%;
+  text-align:    left;
+}
+.act-form__delete-btn:hover:not(:disabled) { background: rgba(231, 76, 60, 0.18); }
+.act-form__delete-btn:disabled             { cursor: default; opacity: 0.4; }
+
+.act-form__delete-confirm {
+  display:        flex;
+  flex-direction: column;
+  gap:            8px;
+}
+
+.act-form__delete-warning {
+  color:     var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  margin:    0;
+}
+.act-form__delete-warning strong { color: var(--text-primary); }
+
+.act-form__delete-actions {
+  display: flex;
+  gap:     6px;
+}
+
+.act-form__delete-confirm-btn {
+  background:    #e74c3c;
+  border:        none;
+  border-radius: 5px;
+  color:         #fff;
+  cursor:        pointer;
+  flex:          1;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       5px 0;
+  transition:    background 0.12s;
+}
+.act-form__delete-confirm-btn:hover:not(:disabled) { background: #c0392b; }
+.act-form__delete-confirm-btn:disabled             { cursor: default; opacity: 0.4; }
+
+.act-form__delete-cancel-btn {
+  background:  transparent;
+  border:      1px solid var(--border-color);
+  border-radius: 5px;
+  color:       var(--text-secondary);
+  cursor:      pointer;
+  font-size:   11px;
+  padding:     5px 14px;
+  transition:  all 0.12s;
+}
+.act-form__delete-cancel-btn:hover:not(:disabled) {
+  border-color: var(--text-secondary);
+  color:        var(--text-primary);
+}
+.act-form__delete-cancel-btn:disabled { cursor: default; opacity: 0.4; }
+
+/* ============================================================
+   GANTT — Phase 4 additions
+   Empty state and loading state.
+   ============================================================ */
+
+.gantt-wrap--state {
+  align-items:     center;
+  display:         flex;
+  flex:            1;
+  justify-content: center;
+}
+
+.gantt-state {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   12px;
+  gap:         8px;
+  padding:     16px;
+}
+
+.gantt-state--error {
+  color:      #e74c3c;
+  font-size:  13px;
+}
+
+.gantt-state__spinner {
+  animation:     spin 0.8s linear infinite;
+  border:        2px solid var(--border-color);
+  border-radius: 50%;
+  border-top:    2px solid var(--accent-blue);
+  flex-shrink:   0;
+  height:        16px;
+  width:         16px;
+}
+
+.gantt-state__text {
+  color:     var(--text-secondary);
+  font-size: 12px;
+}
+
+.gantt-empty {
+  padding:    40px 20px;
+  text-align: center;
+}
+
+.gantt-empty__icon {
+  font-size:     32px;
+  margin-bottom: 12px;
+}
+
+.gantt-empty__title {
+  color:         var(--text-primary);
+  font-size:     14px;
+  font-weight:   600;
+  margin-bottom: 8px;
+}
+
+.gantt-empty__hint {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  line-height: 1.6;
+}
+.gantt-empty__hint strong { color: var(--text-primary); }
+
+/* Bar label text — truncated inside narrow bars */
+.gantt-bar__label {
+  font-size:     10px;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+  width:         100%;
+}
+
+/* Ensure spin keyframe is present (also defined in upload.css but repeated here
+   as a safety measure for isolated CSS imports). */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 
 
 ====================================================================================================
@@ -16212,32 +17986,32 @@ interface RaycastResult {
 }
 
 // ── Augmented FragmentsModel interface ───────────────────────────────────────
-// Only declares the methods we actually call. All are verified against
-// @thatopen/fragments@3.4.6 dist/index.d.ts.
+// Verified against @thatopen/fragments@3.4.6 dist/index.d.ts
 
 interface FragmentsModelInternal {
-  // ID resolution
   getLocalIds():                       Promise<number[]>
   getGuidsByLocalIds(ids: number[]):   Promise<(string | null)[]>
   getLocalIdsByGuids(guids: string[]): Promise<(number | null)[]>
-
-  // Bounding box — CORRECT API for zoom (no mesh walking)
-  getMergedBox(localIds: number[]): Promise<THREE.Box3>
-
-  // Visibility — CORRECT method name is setVisible (not setVisibility)
+  getMergedBox(localIds: number[]):    Promise<THREE.Box3>
   setVisible(localIds: number[] | undefined, visible: boolean): Promise<void>
   resetVisible(): Promise<void>
 
-  // Raycast
+  // Per-item opacity — operates on GPU buffers within batched geometry,
+  // completely independent of mesh.visible, setVisible(), and setColor().
+  // undefined → all items. Verified in @thatopen/fragments@3.4.6 dist/index.d.ts line 1865.
+  setOpacity(localIds: number[] | undefined, opacity: number): Promise<void>
+  resetOpacity(localIds: number[] | undefined): Promise<void>
+
   raycast(params: {
     camera: THREE.PerspectiveCamera | THREE.OrthographicCamera
     mouse:  THREE.Vector2
     dom:    HTMLCanvasElement
   }): Promise<RaycastResult | null>
 
-  // Tiles map — DataMap<string|number, THREE.Mesh>
-  // Used only for debug inspection if needed
-  tiles: Map<string | number, THREE.Mesh>
+  tiles: {
+    onItemSet:      { add: (cb: (e: { key: string | number; value: THREE.Mesh }) => void) => void }
+    onBeforeDelete: { add: (cb: (e: { key: string | number; value: THREE.Mesh }) => void) => void }
+  }
 }
 
 export class ViewerEngine {
@@ -16255,9 +18029,74 @@ export class ViewerEngine {
   private readonly config: ViewerEngineConfig
   private isDisposed = false
   private ro?: ResizeObserver
-
-  // Tracks isolation state so restoreVisibility() knows whether a reset is needed
   private isIsolated = false
+
+  // ── Wireframe state ───────────────────────────────────────
+  //
+  // WHY material.wireframe = true IS BANNED
+  // ────────────────────────────────────────
+  // That Open Engine v3.4.6 deletes geometry CPU arrays after the first GPU
+  // upload. Three.js wireframe rendering reads geometry.index.array to build
+  // line pairs — it crashes with "Cannot read 'length' of undefined" after
+  // the first frame. LODMesh tiles use ShaderMaterial with no wireframe path.
+  //
+  // WHY mesh.visible = false IS WRONG FOR PER-ITEM CONTROL
+  // ────────────────────────────────────────────────────────
+  // Tiles are BATCHED. One THREE.Mesh tile contains many IFC items packed into
+  // a single BufferGeometry. Per-item visibility, colour, and opacity are
+  // controlled via GPU buffers managed by the engine's HighlightManager —
+  // NOT by Three.js mesh.visible.
+  //
+  // When mesh.visible = false, Three.js skips the mesh entirely — the GPU
+  // shader never runs. All per-item setOpacity/setColor/setVisible state
+  // inside that mesh becomes unreachable. There is no way to show one item
+  // from a hidden mesh.
+  //
+  // Furthermore, userData.itemIds on tiles is a Set of raw byte values from a
+  // packed 4-byte per-vertex ID buffer, NOT a Set of IFC localIds. Comparing
+  // localId 219 against this Set will never produce a match.
+  //
+  // CORRECT ARCHITECTURE — model.setOpacity()
+  // ───────────────────────────────────────────
+  // setOpacity(localIds, opacity) is the engine's own per-item opacity API.
+  // It calls model.traverse(items, ...) and model.tiles.updateVirtualMeshes()
+  // — a worker operation that writes opacity data for specific items within
+  // shared batched geometry, completely independent of mesh.visible,
+  // setVisible(), and setColor().
+  //
+  // WIREFRAME ON:
+  //   • ALL tile meshes stay visible = true (shaders keep running)
+  //   • model.setOpacity(undefined, 0) → all items become transparent (GPU-level)
+  //   • LineSegments (EdgeGeometry) become visible → edges appear on dark bg
+  //
+  // SELECTION IN WIREFRAME:
+  //   • model.resetOpacity(selectedLocalIds) → selected items restore full opacity
+  //   • ColorManager.setColor() already applies #FF8C00 highlight (Effect 2 in IFCViewer)
+  //   • Result: selected element appears as solid shaded highlighted mesh
+  //
+  // WIREFRAME OFF:
+  //   • model.resetOpacity(undefined) → all items restore original opacity
+  //   • LineSegments become hidden
+  //
+  // This approach never touches mesh.visible, never conflicts with setVisible()
+  // (Zone/Isolate), never conflicts with setColor() (selection/simulation).
+
+  private wireframeEnabled = false
+
+  // tileKey → LineSegments: built once at tile-arrival, cached permanently.
+  // mesh.visible is NEVER touched — tiles always remain visible=true.
+  private wireframeLines = new Map<string | number, THREE.LineSegments>()
+
+  // Tracks which localIds are currently opacity-restored (= "revealed" as shaded)
+  // so we can re-hide them when selection changes.
+  private revealedLocalIds = new Set<number>()
+
+  // Shared LineBasicMaterial for all edge overlays — white on dark background.
+  private readonly wireframeMaterial = new THREE.LineBasicMaterial({
+    color:      0xFFFFFF,
+    depthTest:  true,
+    depthWrite: false,
+  })
 
   constructor(config: ViewerEngineConfig) {
     this.config       = config
@@ -16332,6 +18171,7 @@ export class ViewerEngine {
           this.fragmentsManager.core.update(true)
         }
         this.loadedModels.push(model)
+        this.hookModelTiles(model)
       })
 
       this.ifcLoader = this.components.get(OBC.IfcLoader)
@@ -16381,10 +18221,247 @@ export class ViewerEngine {
     } catch { /* non-critical */ }
   }
 
+  // ── Wireframe: per-tile edge pre-building ─────────────────
+  //
+  // Registers two hooks on model.tiles:
+  //   onItemSet      → builds EdgesGeometry + LineSegments while CPU arrays live
+  //   onBeforeDelete → disposes the corresponding LineSegments
+  //
+  // IMPORTANT: mesh.visible is NEVER set here. Tile meshes always stay visible=true.
+  // Wireframe "hiding" is achieved via model.setOpacity(undefined, 0), not mesh visibility.
+
+  private hookModelTiles(model: FRAGS.FragmentsModel): void {
+    const internal = model as unknown as FragmentsModelInternal
+
+    internal.tiles.onItemSet.add(({ key, value: mesh }) => {
+      this.buildTileEdges(key, mesh)
+    })
+
+    internal.tiles.onBeforeDelete.add(({ key }) => {
+      this.disposeTileEdges(key)
+    })
+  }
+
+  // ── Wireframe: build edges for one SHELL tile ─────────────
+  //
+  // Called synchronously inside tiles.onItemSet, before the first render frame.
+  // At this point geometry.index.array and position.array are still live CPU TypedArrays.
+  //
+  // SHELL tiles: THREE.Mesh + non-instanced THREE.BufferGeometry + geometry.index
+  // LOD tiles:   LODMesh + LODGeometry (InstancedBufferGeometry) → skipped
+  //
+  // The resulting LineSegments are added to the scene as siblings of model.object
+  // and hidden by default. They are never affected by model.setOpacity() calls.
+
+  private buildTileEdges(key: string | number, mesh: THREE.Mesh): void {
+    try {
+      const geo = mesh.geometry
+
+      // Skip LOD/LINE tiles — LODGeometry is InstancedBufferGeometry
+      if ((geo as THREE.InstancedBufferGeometry).isInstancedBufferGeometry) {
+        return
+      }
+
+      if (!geo.index || !geo.index.array) {
+        return
+      }
+
+      // Build EdgesGeometry from CPU arrays while they are still alive.
+      // EdgesGeometry produces its own Float32 position buffer that is never deleted.
+      const edges    = new THREE.EdgesGeometry(geo)
+      const segments = new THREE.LineSegments(edges, this.wireframeMaterial)
+
+      // Match tile transform.
+      segments.matrix.copy(mesh.matrix)
+      segments.matrixAutoUpdate = false
+
+      // Hidden by default; shown when wireframe is activated.
+      segments.visible = this.wireframeEnabled
+
+      // Add as a sibling of model.object so LineSegments are unaffected by
+      // model.setOpacity() calls and always render independently.
+      this.world.scene.three.add(segments)
+      this.wireframeLines.set(key, segments)
+
+    } catch (err) {
+      console.warn('[ViewerEngine] wireframe: buildTileEdges failed for tile', key, err)
+    }
+  }
+
+  // ── Wireframe: dispose edges for one tile ─────────────────
+
+  private disposeTileEdges(key: string | number): void {
+    const segments = this.wireframeLines.get(key)
+    if (segments) {
+      try {
+        this.world.scene.three.remove(segments)
+        segments.geometry.dispose()
+      } catch { /* suppress */ }
+      this.wireframeLines.delete(key)
+    }
+  }
+
+  // ── Wireframe toggle (public API) ─────────────────────────
+  //
+  // ON:
+  //   • Show all edge LineSegments
+  //   • Call model.setOpacity(undefined, 0) → all items transparent (GPU-level)
+  //   • mesh.visible stays true — shaders keep running
+  //
+  // OFF:
+  //   • Hide all edge LineSegments
+  //   • Call model.resetOpacity(undefined) → all items restore original opacity
+  //   • Clear revealedLocalIds
+
+  setWireframe(enabled: boolean): void {
+    if (this.wireframeEnabled === enabled) return
+    this.wireframeEnabled = enabled
+
+    // Toggle edge overlays
+    for (const segments of this.wireframeLines.values()) {
+      segments.visible = enabled
+    }
+
+    // Apply / remove opacity mask on all items across all models
+    for (const model of this.loadedModels) {
+      const internal = model as unknown as FragmentsModelInternal
+      if (enabled) {
+        // Make all items transparent — they become invisible at GPU level
+        // while the tile mesh stays visible so shaders can still run per-item
+        internal.setOpacity(undefined, 0).catch(err =>
+          console.warn('[ViewerEngine] setWireframe: setOpacity failed', err)
+        )
+      } else {
+        // Restore all items to their original opacity
+        internal.resetOpacity(undefined).catch(err =>
+          console.warn('[ViewerEngine] setWireframe: resetOpacity failed', err)
+        )
+      }
+    }
+
+    // Clear revealed set on any mode change
+    this.revealedLocalIds.clear()
+
+    console.log(
+      `[ViewerEngine] setWireframe — ${enabled ? 'ON (edges only)' : 'OFF (shaded)'},`,
+      `models: ${this.loadedModels.length}, edge overlays: ${this.wireframeLines.size}`
+    )
+  }
+
+  // ── Wireframe selection reveal — called from handleClick (primary path) ──
+  //
+  // Applies opacity reveal to a set of localIds within the engine's own GPU
+  // buffer system. Called synchronously from handleClick before onObjectPicked,
+  // where the localId is already available from the raycast result.
+  //
+  // Steps:
+  //   1. Re-hide previously revealed localIds (set opacity back to 0)
+  //   2. Reveal newly selected localIds (resetOpacity restores original)
+  //   3. Update revealedLocalIds tracking set
+  //
+  // ColorManager.setColor() (Effect 2 in IFCViewer) applies #FF8C00 highlight
+  // independently — it operates on the same items but different GPU buffer.
+  //
+  // Does NOT affect:
+  //   • setVisible/resetVisible (Zone/Isolate — different GPU buffer)
+  //   • LineSegments visibility
+  //   • mesh.visible (never touched)
+
+  private applyWireframeReveal(nextLocalIds: Set<number>): void {
+    if (!this.wireframeEnabled) return
+
+    for (const model of this.loadedModels) {
+      const internal = model as unknown as FragmentsModelInternal
+
+      // Step 1: re-hide the previously revealed items (if any changed)
+      const toHide = [...this.revealedLocalIds].filter(id => !nextLocalIds.has(id))
+      if (toHide.length > 0) {
+        console.log(`[ViewerEngine] Hiding previous mesh — localIds: [${toHide.join(', ')}]`)
+        internal.setOpacity(toHide, 0).catch(err =>
+          console.warn('[ViewerEngine] applyWireframeReveal: re-hide failed', err)
+        )
+      }
+
+      // Step 2: reveal the newly selected items
+      if (nextLocalIds.size > 0) {
+        const toReveal = Array.from(nextLocalIds)
+        console.log(`[ViewerEngine] Showing shaded mesh — localIds: [${toReveal.join(', ')}]`)
+        // resetOpacity restores original opacity for these specific items
+        internal.resetOpacity(toReveal).catch(err =>
+          console.warn('[ViewerEngine] applyWireframeReveal: reveal failed', err)
+        )
+      }
+    }
+
+    // Step 3: update tracking
+    this.revealedLocalIds = new Set(nextLocalIds)
+    console.log(
+      `[ViewerEngine] Renderer invalidated — revealed localIds: ${nextLocalIds.size},`,
+      `wireframeEnabled: ${this.wireframeEnabled}`
+    )
+  }
+
+  // ── Wireframe selection reveal — public API for programmatic selection ────
+  //
+  // Called by IFCViewer Effect 4 for selection changes from Gantt, Object Tree,
+  // or any source other than a direct 3D click.
+  //
+  // Resolves GlobalIds → localIds (async), then delegates to applyWireframeReveal().
+
+  async updateWireframeSelection(globalIds: string[]): Promise<void> {
+    console.log(
+      '[ViewerEngine] updateWireframeSelection —',
+      `wireframeEnabled: ${this.wireframeEnabled},`,
+      `globalIds: [${globalIds.slice(0, 3).join(', ')}${globalIds.length > 3 ? '…' : ''}]`
+    )
+
+    if (!this.wireframeEnabled) {
+      console.log('[ViewerEngine] updateWireframeSelection: wireframe OFF — no-op')
+      return
+    }
+
+    if (globalIds.length === 0) {
+      console.log('[ViewerEngine] updateWireframeSelection: empty — clearing reveal')
+      this.applyWireframeReveal(new Set())
+      return
+    }
+
+    const allLocalIds = new Set<number>()
+    await Promise.all(
+      this.loadedModels.map(async (model) => {
+        const internal = model as unknown as FragmentsModelInternal
+        try {
+          const resolved = await internal.getLocalIdsByGuids(globalIds)
+          for (const id of resolved) {
+            if (id !== null && id !== undefined) allLocalIds.add(id)
+          }
+        } catch (err) {
+          console.warn('[ViewerEngine] updateWireframeSelection: resolution failed', err)
+        }
+      })
+    )
+
+    console.log(
+      '[ViewerEngine] updateWireframeSelection — resolved',
+      allLocalIds.size, 'localIds, applying reveal'
+    )
+    this.applyWireframeReveal(allLocalIds)
+  }
+
+  // ── Public getter for IFCViewer Effect 4 ──────────────────
+  isWireframeEnabled(): boolean { return this.wireframeEnabled }
+
   // ── Unload ────────────────────────────────────────────────
 
   async unloadAll(): Promise<void> {
-    this.isIsolated = false
+    this.isIsolated       = false
+    this.wireframeEnabled = false
+    this.revealedLocalIds.clear()
+
+    for (const key of this.wireframeLines.keys()) {
+      this.disposeTileEdges(key)
+    }
+    this.wireframeLines.clear()
 
     if (this.loadedModels.length === 0) return
 
@@ -16403,17 +18480,6 @@ export class ViewerEngine {
 
   // ── Phase 3+: Zoom to object ──────────────────────────────
 
-  /**
-   * Fits the camera to the bounding box of a single IFC object.
-   *
-   * Uses model.getMergedBox(localIds) — the correct v3.4.6 API.
-   * This is resolved by the worker thread from actual geometry data,
-   * so no mesh traversal is required and LOD tiles are handled correctly.
-   *
-   * Previous broken approach: walking model.object children looking for
-   * mesh.userData.expressID — that key does NOT exist in v3.4.6.
-   * Tiles set userData.sampleId / userData.tileId / userData.itemIds (Set<number>).
-   */
   async zoomToObject(globalId: string): Promise<void> {
     console.log('[ViewerEngine] zoomToObject — GlobalId:', globalId)
 
@@ -16429,7 +18495,6 @@ export class ViewerEngine {
     for (const model of this.loadedModels) {
       const internal = model as unknown as FragmentsModelInternal
 
-      // Step 1: GlobalId → localId
       let localIds: (number | null)[] = []
       try {
         localIds = await internal.getLocalIdsByGuids([globalId])
@@ -16439,32 +18504,23 @@ export class ViewerEngine {
       }
 
       const localId = localIds[0]
-      console.log('[ViewerEngine] zoomToObject — localId:', localId)
-
       if (localId === null || localId === undefined) {
         console.warn('[ViewerEngine] zoomToObject: GlobalId not found in model')
         continue
       }
 
-      // Step 2: Get the bounding box directly from the engine (correct API)
-      // getMergedBox is resolved by the worker from actual geometry — no mesh walking
       let box: THREE.Box3
       try {
         box = await internal.getMergedBox([localId])
-        console.log('[ViewerEngine] zoomToObject — bbox:', box.min, box.max, 'isEmpty:', box.isEmpty())
-      } catch (err) {
-        console.warn('[ViewerEngine] zoomToObject: getMergedBox failed', err)
-        // Fallback: fit to whole model
+      } catch {
         box = new THREE.Box3().setFromObject(model.object)
-        console.log('[ViewerEngine] zoomToObject — fallback to model bbox:', box.isEmpty())
       }
 
       if (box.isEmpty()) {
-        console.warn('[ViewerEngine] zoomToObject: bounding box is empty — skipping camera move')
+        console.warn('[ViewerEngine] zoomToObject: bounding box is empty')
         return
       }
 
-      // Step 3: Move camera
       try {
         await this.world.camera.controls.fitToBox(box, true, {
           paddingLeft:   0.5,
@@ -16472,41 +18528,23 @@ export class ViewerEngine {
           paddingTop:    0.5,
           paddingBottom: 0.5,
         })
-        console.log('[ViewerEngine] zoomToObject — camera move complete')
       } catch (err) {
         console.warn('[ViewerEngine] zoomToObject: fitToBox failed', err)
       }
 
-      return // first model that contains the object wins
+      return
     }
   }
 
   // ── Phase 3+: Isolate objects ─────────────────────────────
 
-  /**
-   * Isolates a set of IFC objects by hiding everything else.
-   * Passing an empty array restores full visibility.
-   *
-   * Uses model.setVisible(localIds, visible): Promise<void>
-   * which is the correct v3.4.6 API.
-   *
-   * Previous broken approach used setVisibility() — that method does
-   * not exist on FragmentsModel in any version of @thatopen/fragments.
-   */
   async isolateObjects(globalIds: string[]): Promise<void> {
     console.log('[ViewerEngine] isolateObjects —', globalIds.length, 'GlobalIds')
 
-    if (!this.fragmentsManager?.initialized) {
-      console.warn('[ViewerEngine] isolateObjects: FragmentsManager not initialized')
-      return
-    }
-    if (this.loadedModels.length === 0) {
-      console.warn('[ViewerEngine] isolateObjects: no models loaded')
-      return
-    }
+    if (!this.fragmentsManager?.initialized) return
+    if (this.loadedModels.length === 0) return
 
     if (globalIds.length === 0) {
-      console.log('[ViewerEngine] isolateObjects: empty — restoring visibility')
       await this.restoreVisibility()
       return
     }
@@ -16516,98 +18554,66 @@ export class ViewerEngine {
     await Promise.all(
       this.loadedModels.map(async (model) => {
         const internal = model as unknown as FragmentsModelInternal
-
-        // Step 1: resolve target GlobalIds → localIds
         let targetLocalIds: (number | null)[] = []
         try {
           targetLocalIds = await internal.getLocalIdsByGuids(globalIds)
-        } catch (err) {
-          console.warn('[ViewerEngine] isolateObjects: getLocalIdsByGuids failed', err)
-          return
-        }
+        } catch { return }
 
         const targetSet = new Set<number>(
           targetLocalIds.filter((id): id is number => id !== null && id !== undefined)
         )
-        console.log('[ViewerEngine] isolateObjects — target localIds:', targetSet.size)
+        if (targetSet.size === 0) return
 
-        if (targetSet.size === 0) {
-          console.warn('[ViewerEngine] isolateObjects: no localIds resolved')
-          return
-        }
-
-        // Step 2: hide everything, then show only targets
-        // setVisible(undefined, false) hides ALL items
-        // setVisible(targetArray, true) shows only the targets
         try {
           await internal.setVisible(undefined, false)
-          console.log('[ViewerEngine] isolateObjects — hid all items')
-
           await internal.setVisible(Array.from(targetSet), true)
-          console.log('[ViewerEngine] isolateObjects — showed', targetSet.size, 'items')
         } catch (err) {
           console.warn('[ViewerEngine] isolateObjects: setVisible failed', err)
         }
       })
     )
-
-    console.log('[ViewerEngine] isolateObjects — complete')
   }
 
   // ── Phase 3: Layer-filter visibility ─────────────────────
-  // These methods use setVisible/resetVisible (correct API).
 
   async hideObjects(globalIds: string[]): Promise<void> {
     if (globalIds.length === 0 || !this.fragmentsManager?.initialized) return
-
     await Promise.all(
       this.loadedModels.map(async (model) => {
         const internal = model as unknown as FragmentsModelInternal
         try {
           const localIds = await internal.getLocalIdsByGuids(globalIds)
           const valid    = localIds.filter((id): id is number => id !== null && id !== undefined)
-          if (valid.length === 0) return
-          await internal.setVisible(valid, false)
-        } catch {
-          // Non-critical — suppress
-        }
+          if (valid.length > 0) await internal.setVisible(valid, false)
+        } catch { /* suppress */ }
       })
     )
   }
 
   async showObjects(globalIds: string[]): Promise<void> {
     if (globalIds.length === 0 || !this.fragmentsManager?.initialized) return
-
     await Promise.all(
       this.loadedModels.map(async (model) => {
         const internal = model as unknown as FragmentsModelInternal
         try {
           const localIds = await internal.getLocalIdsByGuids(globalIds)
           const valid    = localIds.filter((id): id is number => id !== null && id !== undefined)
-          if (valid.length === 0) return
-          await internal.setVisible(valid, true)
-        } catch {
-          // Suppress
-        }
+          if (valid.length > 0) await internal.setVisible(valid, true)
+        } catch { /* suppress */ }
       })
     )
   }
 
   async restoreVisibility(): Promise<void> {
     if (!this.fragmentsManager?.initialized) return
-
     await Promise.all(
       this.loadedModels.map(async (model) => {
         const internal = model as unknown as FragmentsModelInternal
         try {
-          // resetVisible() restores all items to visible — correct v3.4.6 API
           await internal.resetVisible()
-        } catch {
-          // Suppress
-        }
+        } catch { /* suppress */ }
       })
     )
-
     this.isIsolated = false
   }
 
@@ -16629,9 +18635,7 @@ export class ViewerEngine {
     if (!this.fragmentsManager.initialized) {
       throw new Error('FragmentsManager not initialized. Ensure /public/worker.mjs exists.')
     }
-
     await this.unloadAll()
-
     try {
       const model = await this.ifcLoader.load(buffer, true, fileName)
       await this.fitCameraToModel(model)
@@ -16647,14 +18651,11 @@ export class ViewerEngine {
 
   private async fitCameraToModel(model: FRAGS.FragmentsModel): Promise<void> {
     try {
-      const box = new THREE.Box3()
-      box.setFromObject(model.object)
-
+      const box = new THREE.Box3().setFromObject(model.object)
       if (box.isEmpty()) {
         await new Promise(resolve => setTimeout(resolve, 150))
         box.setFromObject(model.object)
       }
-
       if (box.isEmpty()) return
 
       const size   = new THREE.Vector3()
@@ -16669,9 +18670,7 @@ export class ViewerEngine {
 
       const maxDim = Math.max(size.x, size.y, size.z)
       this.world.scene.three.children
-        .filter((c): c is THREE.DirectionalLight =>
-          c instanceof THREE.DirectionalLight && c.castShadow
-        )
+        .filter((c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight && c.castShadow)
         .forEach(sun => {
           sun.position.set(center.x + maxDim, center.y + maxDim * 2, center.z + maxDim)
           sun.target.position.copy(center)
@@ -16686,18 +18685,85 @@ export class ViewerEngine {
         })
 
       await this.world.camera.controls.fitToBox(box, true, {
-        paddingLeft:   0.1,
-        paddingRight:  0.1,
-        paddingTop:    0.1,
-        paddingBottom: 0.1,
+        paddingLeft: 0.1, paddingRight: 0.1, paddingTop: 0.1, paddingBottom: 0.1,
       })
-
     } catch (err) {
       console.warn('[ViewerEngine] fitCameraToModel failed:', err)
     }
   }
 
+  // ── Camera view switching ─────────────────────────────────
+
+  private getSceneBoundingBox(): THREE.Box3 {
+    const box = new THREE.Box3()
+    for (const model of this.loadedModels) {
+      const modelBox = new THREE.Box3().setFromObject(model.object)
+      if (!modelBox.isEmpty()) box.union(modelBox)
+    }
+    if (box.isEmpty()) box.set(new THREE.Vector3(-5, 0, -5), new THREE.Vector3(5, 5, 5))
+    return box
+  }
+
+  async setCameraPerspective(): Promise<void> {
+    try {
+      const box    = this.getSceneBoundingBox()
+      const center = new THREE.Vector3()
+      const size   = new THREE.Vector3()
+      box.getCenter(center)
+      box.getSize(size)
+      const offset = Math.max(size.x, size.y, size.z) * 1.2
+      await this.world.camera.controls.setLookAt(
+        center.x + offset, center.y + offset, center.z + offset,
+        center.x, center.y, center.z, true
+      )
+    } catch (err) { console.warn('[ViewerEngine] setCameraPerspective failed:', err) }
+  }
+
+  async setCameraTop(): Promise<void> {
+    try {
+      const box    = this.getSceneBoundingBox()
+      const center = new THREE.Vector3()
+      const size   = new THREE.Vector3()
+      box.getCenter(center)
+      box.getSize(size)
+      const height = center.y + Math.max(size.x, size.z) * 1.5 + size.y
+      await this.world.camera.controls.setLookAt(
+        center.x, height, center.z + 0.001,
+        center.x, center.y, center.z, true
+      )
+      await this.world.camera.controls.fitToBox(box, true, {
+        paddingLeft: 0.1, paddingRight: 0.1, paddingTop: 0.1, paddingBottom: 0.1,
+      })
+    } catch (err) { console.warn('[ViewerEngine] setCameraTop failed:', err) }
+  }
+
+  async setCameraFront(): Promise<void> {
+    try {
+      const box    = this.getSceneBoundingBox()
+      const center = new THREE.Vector3()
+      const size   = new THREE.Vector3()
+      box.getCenter(center)
+      box.getSize(size)
+      const distance = Math.max(size.x, size.y, size.z) * 1.5 + size.z * 0.5
+      await this.world.camera.controls.setLookAt(
+        center.x, center.y, center.z + distance,
+        center.x, center.y, center.z, true
+      )
+      await this.world.camera.controls.fitToBox(box, true, {
+        paddingLeft: 0.1, paddingRight: 0.1, paddingTop: 0.1, paddingBottom: 0.1,
+      })
+    } catch (err) { console.warn('[ViewerEngine] setCameraFront failed:', err) }
+  }
+
   // ── Click handler ─────────────────────────────────────────
+  //
+  // PRIMARY PATH for wireframe selection reveal.
+  //
+  // The raycast result contains the clicked localId directly. We call
+  // applyWireframeReveal() synchronously here — before onObjectPicked fires
+  // the React store update — so the mesh reveal happens in the same microtask.
+  //
+  // This bypasses all React scheduling, store reads, and Effect timing.
 
   private handleClick = async (e: MouseEvent): Promise<void> => {
     if (!this.world || !this.fragmentsManager?.initialized) return
@@ -16710,7 +18776,7 @@ export class ViewerEngine {
     const mouse = new THREE.Vector2(e.clientX, e.clientY)
 
     try {
-      const candidates: Array<{ globalId: string; distance: number }> = []
+      const candidates: Array<{ globalId: string; distance: number; localId: number }> = []
 
       await Promise.all(
         this.loadedModels.map(async (model) => {
@@ -16735,17 +18801,47 @@ export class ViewerEngine {
           const globalId = guids[0]
           if (typeof globalId !== 'string' || globalId.length === 0) return
 
-          candidates.push({ globalId, distance: result.distance ?? Infinity })
+          candidates.push({ globalId, distance: result.distance ?? Infinity, localId: result.localId })
         })
       )
 
       if (candidates.length === 0) {
+        // Click on empty space
+        if (this.wireframeEnabled) {
+          console.log('[ViewerEngine] Wireframe selection update — clearing (no hit)')
+          this.applyWireframeReveal(new Set())
+        }
         this.config.onObjectPicked(null, false)
         return
       }
 
       candidates.sort((a, b) => a.distance - b.distance)
-      this.config.onObjectPicked(candidates[0].globalId, isMulti)
+      const winner = candidates[0]
+
+      if (this.wireframeEnabled) {
+        // Build the next revealed set
+        let nextIds: Set<number>
+        if (isMulti) {
+          nextIds = new Set(this.revealedLocalIds)
+          if (nextIds.has(winner.localId)) nextIds.delete(winner.localId)
+          else                              nextIds.add(winner.localId)
+        } else {
+          nextIds = new Set([winner.localId])
+        }
+
+        console.log(
+          '[ViewerEngine] Wireframe selection update',
+          `\n  Current selected GlobalId: ${winner.globalId}`,
+          `\n  Current localId: ${winner.localId}`,
+          `\n  Previous revealed localIds: [${[...this.revealedLocalIds].join(', ')}]`,
+          `\n  Next revealed localIds: [${[...nextIds].join(', ')}]`,
+          `\n  Wireframe enabled: ${this.wireframeEnabled}`
+        )
+
+        this.applyWireframeReveal(nextIds)
+      }
+
+      this.config.onObjectPicked(winner.globalId, isMulti)
 
     } catch {
       this.config.onObjectPicked(null, false)
@@ -16754,32 +18850,16 @@ export class ViewerEngine {
 
   // ── Selection label support ───────────────────────────────
 
-  /**
-   * Resolves the world-space top-center point of an IFC object's
-   * bounding box. Used by SelectionLabel to compute screen position.
-   *
-   * Returns null when:
-   * - FragmentsManager is not initialized
-   * - No models are loaded
-   * - The GlobalId is not found in any model
-   * - The resolved bounding box is empty (unloaded tile)
-   *
-   * The caller (SelectionLabel RAF loop) is responsible for caching
-   * the result and re-projecting it to screen space on every frame.
-   */
   async getObjectWorldTop(globalId: string): Promise<THREE.Vector3 | null> {
     if (!this.fragmentsManager?.initialized) return null
     if (this.loadedModels.length === 0) return null
 
     for (const model of this.loadedModels) {
       const internal = model as unknown as FragmentsModelInternal
-
       let localIds: (number | null)[] = []
       try {
         localIds = await internal.getLocalIdsByGuids([globalId])
-      } catch {
-        continue
-      }
+      } catch { continue }
 
       const localId = localIds[0]
       if (localId === null || localId === undefined) continue
@@ -16788,14 +18868,11 @@ export class ViewerEngine {
       try {
         box = await internal.getMergedBox([localId])
       } catch {
-        // Fallback: search model object for a rough bbox
-        box = new THREE.Box3()
-        box.setFromObject(model.object)
+        box = new THREE.Box3().setFromObject(model.object)
       }
 
       if (box.isEmpty()) return null
 
-      // Top-center of the bounding box in world space
       const center = new THREE.Vector3()
       box.getCenter(center)
       return new THREE.Vector3(center.x, box.max.y, center.z)
@@ -16804,28 +18881,18 @@ export class ViewerEngine {
     return null
   }
 
-  /**
-   * Returns the Three.js PerspectiveCamera instance.
-   * Used by SelectionLabel for world-to-screen projection.
-   */
   getCamera(): THREE.PerspectiveCamera | null {
     if (!this.world?.camera?.three) return null
     return this.world.camera.three as THREE.PerspectiveCamera
   }
 
-  /**
-   * Returns the viewer container element.
-   * Used by SelectionLabel to read clientWidth/clientHeight for NDC → px conversion.
-   */
-  getContainerElement(): HTMLDivElement {
-    return this.config.container
-  }
+  getContainerElement(): HTMLDivElement { return this.config.container }
 
   // ── Getters ───────────────────────────────────────────────
 
-  getScene(): THREE.Scene         { return this.world.scene.three }
-  getFragmentsManager()           { return this.fragmentsManager }
-  getLoadedModels()               { return this.loadedModels }
+  getScene(): THREE.Scene     { return this.world.scene.three }
+  getFragmentsManager()       { return this.fragmentsManager }
+  getLoadedModels()           { return this.loadedModels }
 
   // ── Dispose ───────────────────────────────────────────────
 
@@ -16833,6 +18900,11 @@ export class ViewerEngine {
     if (this.isDisposed) return
     this.isDisposed = true
     try {
+      for (const key of this.wireframeLines.keys()) {
+        this.disposeTileEdges(key)
+      }
+      this.wireframeLines.clear()
+      this.wireframeMaterial.dispose()
       this.ro?.disconnect()
       this.config.container.removeEventListener('click', this.handleClick)
       this.components.dispose()

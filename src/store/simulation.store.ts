@@ -3,8 +3,8 @@ import { SimulationEngine } from '../core/simulation/SimulationEngine'
 import { progressToDate } from '../utils/date.utils'
 import type { SimulationStatus, SimulationFrame, Activity } from '../types'
 
-const PROJECT_START = new Date('2024-01-01')
-const PROJECT_END   = new Date('2024-12-31')
+const PROJECT_START = new Date('2026-01-01')
+const PROJECT_END   = new Date('2026-12-31')
 
 interface SimulationState {
   /** Current simulation date derived from progress */

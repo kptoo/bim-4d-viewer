@@ -1,61 +1,48 @@
-/**
- * Activity store — owns construction schedule state.
- *
- * Phase 1: seeded with mock data.
- * Phase 4: will be replaced by React Query + Neon API.
- */
-
-import { create } from 'zustand'
-import { ActivityLinker } from '../core/ifc/ActivityLinker'
+import { create }            from 'zustand'
+import { ActivityLinker }    from '../core/ifc/ActivityLinker'
 import type { Activity, CreateActivityPayload, UpdateActivityPayload } from '../types'
-import type { LinkMap } from '../core/ifc/ActivityLinker'
-
-/** Mock activities — replaced by DB data in Phase 4 */
-const MOCK_ACTIVITIES: Activity[] = [
-  {
-    id: 'task-1', name: 'Foundation Works',
-    startDate: '2024-01-01', endDate: '2024-02-28',
-    color: '#E67E22', linkedGlobalIds: ['A1','A2','A3'],
-    dependencies: [], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'task-2', name: 'Structural Frame',
-    startDate: '2024-02-15', endDate: '2024-04-30',
-    color: '#3498DB', linkedGlobalIds: ['A4','A5','A6'],
-    dependencies: ['task-1'], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'task-3', name: 'Facade & Slabs',
-    startDate: '2024-04-01', endDate: '2024-06-30',
-    color: '#9B59B6', linkedGlobalIds: ['A7','A8'],
-    dependencies: ['task-2'], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'task-4', name: 'MEP Installation',
-    startDate: '2024-05-15', endDate: '2024-08-31',
-    color: '#1ABC9C', linkedGlobalIds: ['A9','A10'],
-    dependencies: ['task-2'], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'task-5', name: 'Finishes',
-    startDate: '2024-08-01', endDate: '2024-11-30',
-    color: '#E74C3C', linkedGlobalIds: ['A11','A12'],
-    dependencies: ['task-4'], createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
-  },
-]
+import type { LinkMap }      from '../core/ifc/ActivityLinker'
 
 interface ActivityState {
+  /** All activities loaded from the database */
   activities: Activity[]
-  /** Pre-computed bidirectional link map */
+  /** Pre-computed bidirectional link map for O(1) lookups */
   linkMap:    LinkMap
+  /** Whether the initial DB fetch has completed */
+  isLoaded:   boolean
 
   // ── Actions ──────────────────────────────────────────────
-  setActivities:    (activities: Activity[]) => void
-  addActivity:      (payload: CreateActivityPayload) => void
-  updateActivity:   (payload: UpdateActivityPayload) => void
-  deleteActivity:   (id: string) => void
-  getActivityById:  (id: string) => Activity | undefined
+
+  /**
+   * Called by useActivities() hook after a successful DB fetch.
+   * Replaces the current in-memory list and rebuilds the link map.
+   */
+  setActivities: (activities: Activity[]) => void
+
+  /**
+   * Optimistic local add — used by useCreateActivity mutation's onMutate.
+   * The real data arrives via setActivities() after cache invalidation.
+   */
+  addActivity: (payload: CreateActivityPayload) => void
+
+  /**
+   * Optimistic local update — used by useUpdateActivity mutation's onMutate.
+   */
+  updateActivity: (payload: UpdateActivityPayload) => void
+
+  /**
+   * Optimistic local delete — used by useDeleteActivity mutation's onMutate.
+   */
+  deleteActivity: (id: string) => void
+
+  /** Selector: returns an activity by ID, or undefined */
+  getActivityById: (id: string) => Activity | undefined
+
+  /** Selector: returns all activities linked to an IFC object */
   getActivitiesForObject: (globalId: string) => Activity[]
+
+  /** Selector: returns all IFC GlobalIds linked to an activity */
+  getObjectsForActivity: (activityId: string) => string[]
 }
 
 function buildLinkMap(activities: Activity[]): LinkMap {
@@ -63,20 +50,22 @@ function buildLinkMap(activities: Activity[]): LinkMap {
 }
 
 export const useActivityStore = create<ActivityState>((set, get) => ({
-  activities: MOCK_ACTIVITIES,
-  linkMap:    buildLinkMap(MOCK_ACTIVITIES),
+  activities: [],
+  linkMap:    buildLinkMap([]),
+  isLoaded:   false,
 
   setActivities: (activities) =>
-    set({ activities, linkMap: buildLinkMap(activities) }),
+    set({ activities, linkMap: buildLinkMap(activities), isLoaded: true }),
 
   addActivity: (payload) => {
-    const newActivity: Activity = {
+    // Generate a temporary ID — overwritten when the real data arrives
+    const tempActivity: Activity = {
       ...payload,
-      id:        `task-${Date.now()}`,
+      id:        `temp-${Date.now()}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
-    const next = [...get().activities, newActivity]
+    const next = [...get().activities, tempActivity]
     set({ activities: next, linkMap: buildLinkMap(next) })
   },
 
@@ -103,4 +92,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       .map(id => get().activities.find(a => a.id === id))
       .filter((a): a is Activity => a !== undefined)
   },
+
+  getObjectsForActivity: (activityId) =>
+    ActivityLinker.getObjectsForActivity(activityId, get().linkMap),
 }))

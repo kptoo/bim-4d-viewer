@@ -8,11 +8,13 @@ import IFCObjectTree             from './IFCObjectTree'
 import ZonePanel                 from './zones/ZonePanel'
 import ExistingZonesPanel        from './zones/ExistingZonesPanel'
 import ZoneFilterBar             from './zones/ZoneFilterBar'
+import ActivityPanel             from './activities/ActivityPanel'
 import { useViewerStore }        from '../store/viewer.store'
 import { useLayerStore }         from '../store/layer.store'
+import { useActivityStore }      from '../store/activity.store'
 import { IFCUploadService }      from '../services/ifc/IFCUploadService'
 
-type RightTab = 'inspector' | 'tree' | 'zones' | 'existing-zones'
+type RightTab = 'inspector' | 'tree' | 'zones' | 'existing-zones' | 'activities'
 
 export default function Layout() {
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
@@ -34,6 +36,7 @@ export default function Layout() {
   const setWireframe         = useViewerStore(s => s.setWireframe)
 
   const activeFilterIds = useLayerStore(s => s.activeFilterIds)
+  const activityCount   = useActivityStore(s => s.activities.length)
 
   const [rightTab, setRightTab] = useState<RightTab>('inspector')
 
@@ -110,6 +113,11 @@ export default function Layout() {
           <span className="bim-badge">
             {ifcObjects.length} Elements
           </span>
+          {activityCount > 0 && (
+            <span className="bim-badge">
+              📅 {activityCount} {activityCount === 1 ? 'Activity' : 'Activities'}
+            </span>
+          )}
           {activeFilterIds.length > 0 && (
             <span className="bim-badge bim-badge--zone-filter">
               📐 {activeFilterIds.length} zone{activeFilterIds.length !== 1 ? 's' : ''} filtered
@@ -213,7 +221,7 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Right: Inspector | Object Tree | Zones | Existing Zones */}
+        {/* Right: Inspector | Object Tree | Zones | Existing Zones | Activities */}
         <div className="panel" style={{ borderRight: 'none' }}>
           <div className="panel-header">
             <div className="panel-tabs">
@@ -240,9 +248,8 @@ export default function Layout() {
               </button>
 
               {/*
-                New tab — dedicated to managing, assigning, filtering existing zones.
-                Badge shows active filter count so users know filters are on even
-                when viewing a different tab.
+                Existing Zones tab — badge shows active filter count so users
+                know filters are on even when viewing a different tab.
               */}
               <button
                 className={`panel-tab${rightTab === 'existing-zones' ? ' panel-tab--active' : ''}`}
@@ -251,6 +258,21 @@ export default function Layout() {
                 Existing Zones
                 {activeFilterIds.length > 0 && (
                   <span className="panel-tab__badge">{activeFilterIds.length}</span>
+                )}
+              </button>
+
+              {/*
+                Activities tab — Phase 4 addition.
+                Badge shows total activity count so users always know how
+                many activities are in the schedule.
+              */}
+              <button
+                className={`panel-tab${rightTab === 'activities' ? ' panel-tab--active' : ''}`}
+                onClick={() => setRightTab('activities')}
+              >
+                Activities
+                {activityCount > 0 && (
+                  <span className="panel-tab__badge">{activityCount}</span>
                 )}
               </button>
 
@@ -279,9 +301,14 @@ export default function Layout() {
                 <ZonePanel />
               </ErrorBoundary>
 
-            ) : (
+            ) : rightTab === 'existing-zones' ? (
               <ErrorBoundary context="Existing Zones Panel">
                 <ExistingZonesPanel />
+              </ErrorBoundary>
+
+            ) : (
+              <ErrorBoundary context="Activities Panel">
+                <ActivityPanel />
               </ErrorBoundary>
             )}
 

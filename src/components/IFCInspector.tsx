@@ -9,6 +9,7 @@ import { useLayerStore }      from '../store/layer.store'
 import { useSimulationStore } from '../store/simulation.store'
 import { ifcTypeIcon }        from '../utils/ifc.utils'
 import ZoneAssignWidget       from './zones/ZoneAssignWidget'
+import { useAllAssignments }  from '../hooks/useAssignments'
 import type { IFCObject, IFCProperty, Activity, SimulationStatus } from '../types'
 
 // ─── Status labels ────────────────────────────────────────────────────────────
@@ -25,12 +26,13 @@ interface SectionProps {
   title:        string
   defaultOpen?: boolean
   badge?:       number
+  badgeLoading?: boolean
   accentColor?: string
   children:     ReactNode
 }
 
 const Section = memo(function Section({
-  title, defaultOpen = true, badge, accentColor, children,
+  title, defaultOpen = true, badge, badgeLoading, accentColor, children,
 }: SectionProps) {
   const [open, setOpen] = useState(defaultOpen)
 
@@ -43,9 +45,11 @@ const Section = memo(function Section({
       >
         <span className={`insp-chevron${open ? ' insp-chevron--open' : ''}`}>▶</span>
         <span className="insp-section-title">{title}</span>
-        {badge !== undefined && (
+        {badgeLoading ? (
+          <span className="insp-section-badge" style={{ opacity: 0.4 }}>…</span>
+        ) : badge !== undefined ? (
           <span className="insp-section-badge">{badge}</span>
-        )}
+        ) : null}
       </button>
 
       {open && (
@@ -200,6 +204,35 @@ export default function IFCInspector() {
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
 
+  // ── Assignments — subscribe to the same React Query cache entry ───────────
+  //
+  // ROOT CAUSE OF THE BUG:
+  // IFCInspector read zone data via getLayersForObject(), which reads from
+  // layer.store.assignments. That store is populated by useAllAssignments()
+  // in IFCViewer.tsx — but the fetch is asynchronous. When the user selects
+  // an element immediately after model load, the fetch may not have completed
+  // yet, so assignments = [] and getLayersForObject() returns [].
+  //
+  // Opening ExistingZonesPanel didn't fix the data — it just allowed enough
+  // time for the background fetch to complete and call setAssignments().
+  //
+  // THE FIX:
+  // Call useAllAssignments() here. React Query deduplicates by queryKey —
+  // this does NOT fire a second network request. It simply subscribes this
+  // component to the same cache entry already being managed by IFCViewer.
+  // IFCInspector now knows whether the data is loading (isLoading) and
+  // re-renders automatically the moment assignments arrive in the cache.
+  //
+  // This makes IFCInspector self-sufficient: it displays correct zone counts
+  // immediately after selection, with no dependency on ExistingZonesPanel
+  // being mounted or any tab-switching by the user.
+  //
+  // The getLayersForObject() call still reads from the Zustand store (which
+  // useAllAssignments populates via its useEffect), so the data path is
+  // identical — we just ensure we re-render when it becomes available.
+
+  const { isLoading: assignmentsLoading } = useAllAssignments()
+
   // ── Isolation toggle ───────────────────────────────────────
   const [isIsolated, setIsIsolated] = useState(false)
 
@@ -213,7 +246,9 @@ export default function IFCInspector() {
       ? getActivitiesForObject(ifcObject.globalId)[0]
       : undefined
 
-  // Zones assigned to this object — used for the badge count on the section header
+  // Zones assigned to this object.
+  // getLayersForObject reads from layer.store.assignments, which is now
+  // guaranteed to be populated because we subscribe to useAllAssignments().
   const assignedZones = ifcObject ? getLayersForObject(ifcObject.globalId) : []
 
   const frames = computeAllFrames(activities)
@@ -338,18 +373,21 @@ export default function IFCInspector() {
 
       {/*
         ── Zone Assignment ─────────────────────────────────────────────────────
-        Rendered as a permanent Section immediately below the action bar.
-        Always open by default (defaultOpen={true}) — no toggle required.
-        The badge shows the count of currently assigned zones at a glance.
+        The badge count is derived from assignedZones (Zustand store).
+        While the assignments query is still loading, show a "…" placeholder
+        so the user knows data is incoming rather than seeing a stale 0.
 
-        This is the Archicad-style workflow:
-          Select object → Inspector shows Zone Assignment → Assign.
-        No tab switching. No scrolling. No hidden panel to discover.
+        ZoneAssignWidget uses useAssignmentsByGlobalId() internally — a
+        per-object query that is also deduplicated by React Query. Both
+        the badge here and the widget's list are always in sync because
+        mutations in ZoneAssignWidget invalidate assignmentKeys.all,
+        which triggers a refetch that updates both this badge and the list.
       */}
       <Section
         title="Zone Assignment"
         defaultOpen={true}
         badge={assignedZones.length > 0 ? assignedZones.length : undefined}
+        badgeLoading={assignmentsLoading && assignedZones.length === 0}
         accentColor="var(--accent-blue)"
       >
         <ZoneAssignWidget />
