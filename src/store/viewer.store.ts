@@ -1,102 +1,169 @@
+/**
+ * viewer.store.ts — Zustand store for the 3D viewer and IFC model state.
+ *
+ * This store is the bridge between the pure-JS ViewerEngine (Three.js)
+ * and the React component tree. It holds:
+ *
+ * 1. **Model data** — IFC objects and the spatial tree extracted from the IFC file.
+ * 2. **Load state** — Tracks the IFC loading lifecycle (idle → loading → loaded/error).
+ * 3. **Render state** — Active camera view and wireframe toggle.
+ * 4. **Engine actions** — Callback references into the live ViewerEngine instance.
+ *    These are nulled only when the engine is disposed (component unmount).
+ *
+ * Architecture note on engine actions:
+ *   Engine actions (zoom, isolate, camera views) are closures that reference
+ *   the live ViewerEngine via engineRef.current in IFCViewer. They are
+ *   registered once in onSceneReady and persist across model reloads.
+ *
+ *   `resetModel()` intentionally does NOT clear engine actions. Only
+ *   `clearEngineActions()` — called in the IFCViewer unmount cleanup —
+ *   should null them. See viewer.store.ts inline comments for details.
+ *
+ * @module viewer.store
+ */
+
 import { create } from 'zustand'
 import type { IFCObject, IFCSpatialTree } from '../types'
 
+// ── Type exports ───────────────────────────────────────────────────────────────
+
+/**
+ * The active camera view mode.
+ * 'wireframe' is used to track the active state of the wireframe toggle button,
+ * not as a standalone camera projection.
+ */
 export type RenderMode = 'perspective' | 'top' | 'front' | 'wireframe'
 
+/**
+ * IFC model load lifecycle states.
+ * - `idle`    — No model loaded; upload zone is visible.
+ * - `loading` — WASM parsing in progress; loading overlay is visible.
+ * - `loaded`  — Model fully loaded and rendered in the 3D scene.
+ * - `error`   — Load failed; error message is displayed.
+ */
 export type ModelLoadState =
-  | 'idle'        // No model loaded, showing upload zone
-  | 'loading'     // WASM parsing in progress
-  | 'loaded'      // Model fully loaded and rendered
-  | 'error'       // Load failed
+  | 'idle'
+  | 'loading'
+  | 'loaded'
+  | 'error'
+
+// ── State shape ───────────────────────────────────────────────────────────────
 
 interface ViewerState {
-  /** All IFC objects currently loaded (physical elements only) */
-  ifcObjects:       IFCObject[]
+  /** All IFC physical elements extracted from the model (no spatial nodes). */
+  ifcObjects: IFCObject[]
 
   /**
-   * The IFC spatial decomposition tree.
-   * Built from IFCRELAGGREGATES + IFCRELCONTAINEDINSPATIALSTRUCTURE.
+   * The IFC spatial decomposition tree built from IFCRELAGGREGATES and
+   * IFCRELCONTAINEDINSPATIALSTRUCTURE relationships.
    * null when no model is loaded or extraction failed.
    */
-  spatialTree:      IFCSpatialTree | null
+  spatialTree: IFCSpatialTree | null
 
-  /** Current model load state */
-  modelLoadState:   ModelLoadState
-  /** Error message if modelLoadState === 'error' */
-  modelError:       string | null
-  /** Loaded file name for display */
-  modelFileName:    string | null
-  /** Loaded file size for display */
-  modelFileSize:    number | null
-  /** Whether the Three.js scene is initialized */
-  sceneReady:       boolean
-  /** Current render mode / active camera view */
-  renderMode:       RenderMode
+  /** Current model load lifecycle state. */
+  modelLoadState: ModelLoadState
+
+  /** Error message when modelLoadState === 'error'. null otherwise. */
+  modelError: string | null
+
+  /** Name of the loaded IFC file (e.g. "office-building.ifc"). null when unloaded. */
+  modelFileName: string | null
+
+  /** Size of the loaded IFC file in bytes. null when unloaded. */
+  modelFileSize: number | null
+
   /**
-   * Whether wireframe is currently enabled.
-   * Tracked separately from renderMode so that wireframe can be
-   * toggled independently of the active camera view.
+   * Whether the Three.js scene has been initialized.
+   * Set to true once ViewerEngine.init() completes (onSceneReady fires).
+   * Controls whether engine action buttons are enabled in the UI.
    */
-  wireframeActive:  boolean
+  sceneReady: boolean
+
+  /** The active camera view mode. Used to highlight the correct view button. */
+  renderMode: RenderMode
 
   /**
-   * Engine action: zoom the camera to fit a single IFC object.
-   * Set by IFCViewer once the ViewerEngine is ready (onSceneReady).
-   * Persists across model loads — only cleared on ViewerEngine disposal.
-   * null when no engine is mounted.
+   * Whether wireframe mode is currently enabled.
+   * Tracked separately from renderMode so wireframe can be toggled
+   * independently of the active camera projection.
    */
-  zoomToObject:     ((globalId: string) => void) | null
+  wireframeActive: boolean
 
   /**
-   * Engine action: isolate one or more IFC objects (hide all others).
-   * Passing an empty array restores full visibility.
-   * Set by IFCViewer once the ViewerEngine is ready (onSceneReady).
-   * Persists across model loads — only cleared on ViewerEngine disposal.
-   * null when no engine is mounted.
+   * Zooms the camera to frame a single IFC object.
+   * Set by IFCViewer in onSceneReady. null until the engine is ready.
+   *
+   * @param globalId - IFC object GlobalId to zoom to
    */
-  isolateObjects:   ((globalIds: string[]) => void) | null
+  zoomToObject: ((globalId: string) => void) | null
 
   /**
-   * Engine action: switch to perspective view.
-   * Registered by IFCViewer in onSceneReady. null until engine is mounted.
+   * Isolates one or more IFC objects (hides all others).
+   * Passing an empty array restores full model visibility.
+   * Set by IFCViewer in onSceneReady. null until the engine is ready.
+   *
+   * @param globalIds - Array of GlobalIds to isolate; [] = show all
+   */
+  isolateObjects: ((globalIds: string[]) => void) | null
+
+  /**
+   * Switches the camera to standard perspective projection.
+   * null until the engine is ready.
    */
   setCameraPerspective: (() => void) | null
 
   /**
-   * Engine action: switch to top (plan) view.
-   * Registered by IFCViewer in onSceneReady. null until engine is mounted.
+   * Switches the camera to orthographic top-down (plan) view.
+   * null until the engine is ready.
    */
   setCameraTop: (() => void) | null
 
   /**
-   * Engine action: switch to front (elevation) view.
-   * Registered by IFCViewer in onSceneReady. null until engine is mounted.
+   * Switches the camera to orthographic front (elevation) view.
+   * null until the engine is ready.
    */
   setCameraFront: (() => void) | null
 
   /**
-   * Engine action: toggle wireframe rendering.
-   * Registered by IFCViewer in onSceneReady. null until engine is mounted.
+   * Enables or disables wireframe overlay rendering.
+   * null until the engine is ready.
+   *
+   * @param enabled - true to enable wireframe, false to disable
    */
   setWireframe: ((enabled: boolean) => void) | null
 
   // ── Actions ──────────────────────────────────────────────
+
+  /** Replaces the loaded IFC objects array. Called after IFC parsing completes. */
   setIFCObjects:       (objects: IFCObject[]) => void
+  /** Sets the spatial decomposition tree. Called after IFC parsing completes. */
   setSpatialTree:      (tree: IFCSpatialTree | null) => void
+  /** Updates the model load state machine. */
   setModelLoadState:   (state: ModelLoadState) => void
+  /** Sets the error message (use with setModelLoadState('error')). */
   setModelError:       (error: string | null) => void
+  /** Sets model file metadata for display in the header. */
   setModelMeta:        (fileName: string, fileSize: number) => void
+  /** Marks the Three.js scene as initialized. */
   setSceneReady:       (ready: boolean) => void
+  /** Updates the active camera view mode for button highlighting. */
   setRenderMode:       (mode: RenderMode) => void
+  /** Updates the wireframe active flag. */
   setWireframeActive:  (active: boolean) => void
-  setEngineActions:    (
-    zoom: (globalId: string) => void,
+
+  /**
+   * Registers the zoom and isolate action callbacks from the ViewerEngine.
+   * Called in IFCViewer's onSceneReady. Persists across model reloads.
+   */
+  setEngineActions: (
+    zoom:    (globalId: string) => void,
     isolate: (globalIds: string[]) => void
   ) => void
+
   /**
-   * Registers the camera view + wireframe callbacks from the live ViewerEngine.
-   * Called inside IFCViewer's onSceneReady, alongside setEngineActions.
-   * Persists across model loads — cleared only on engine disposal.
+   * Registers the camera view and wireframe callbacks from the ViewerEngine.
+   * Called in IFCViewer's onSceneReady alongside setEngineActions.
+   * Persists across model reloads.
    */
   setCameraActions: (
     perspective: () => void,
@@ -104,10 +171,36 @@ interface ViewerState {
     front:       () => void,
     wireframe:   (enabled: boolean) => void
   ) => void
-  clearEngineActions:  () => void
-  resetModel:          () => void
+
+  /**
+   * Clears all engine action callbacks.
+   * Called ONLY in IFCViewer's useEffect cleanup (engine disposal).
+   * Never call this during model reloads — engine actions remain valid
+   * across model loads (the engine instance persists).
+   */
+  clearEngineActions: () => void
+
+  /**
+   * Resets model data back to the 'idle' state.
+   * Called when the user clicks "Load New Model" in the header.
+   *
+   * IMPORTANT: Does NOT clear engine action callbacks. The ViewerEngine
+   * instance is not disposed during a model reload — it continues to accept
+   * new models. Engine callbacks remain valid and must not be nulled here.
+   * See the comment in the implementation for the detailed reasoning.
+   */
+  resetModel: () => void
+
+  /**
+   * Looks up a single IFC object by its GlobalId.
+   * Returns undefined if not found (model not loaded or object not extracted).
+   *
+   * @param globalId - IFC GlobalId to look up
+   */
   getObjectByGlobalId: (globalId: string) => IFCObject | undefined
 }
+
+// ── Store ─────────────────────────────────────────────────────────────────────
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
   ifcObjects:           [],
@@ -156,31 +249,25 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     setWireframe:         null,
   }),
 
-  // ── FIX: resetModel resets only MODEL data and load state. ──────────────
+  // ── resetModel ─────────────────────────────────────────────────────────────
   //
-  // It must NOT null zoomToObject / isolateObjects / camera actions.
+  // Resets ONLY model data and load state. Does NOT touch engine callbacks.
   //
-  // Root cause of the bug:
-  //   The "Load New Model" button in Layout.tsx calls resetModel() before the
-  //   user uploads the next file.  resetModel previously nulled the engine
-  //   action callbacks.  Because setEngineActions is only called once — inside
-  //   onSceneReady, which fires only during ViewerEngine.init() at component
-  //   mount — those callbacks were never restored after a model replacement.
-  //   Result: Zoom / Isolate buttons remained permanently disabled for every
-  //   model loaded after the first.
+  // Background:
+  //   The "Load New Model" flow (Layout → resetModel → upload → IFCViewer loads)
+  //   must NOT clear engine action callbacks because:
   //
-  // Engine action callbacks are closures that reference the live ViewerEngine
-  // via engineRef.current.  The ViewerEngine instance is created once at
-  // IFCViewer mount and persists across model loads.  The callbacks remain
-  // valid as long as the engine is alive.
+  //   1. The ViewerEngine instance is created ONCE at IFCViewer mount and
+  //      persists for the lifetime of the component.
+  //   2. Engine callbacks (zoom, isolate, camera) are closures over
+  //      engineRef.current, which remains valid across model loads.
+  //   3. setEngineActions() and setCameraActions() are called in onSceneReady,
+  //      which fires ONLY during ViewerEngine.init() — not on each model load.
+  //   4. If resetModel() cleared callbacks, they would never be restored for
+  //      the second, third, etc. model loaded in the same session.
   //
-  // Responsibility split:
-  //   • resetModel()        — clears MODEL data only (objects, tree, state,
-  //                           meta, renderMode, wireframeActive).
-  //                           Never touches engine action callbacks.
-  //   • clearEngineActions() — called only in the IFCViewer mount-effect
-  //                            cleanup (i.e. on engine disposal / unmount).
-  //                            This is the only correct place to null them.
+  //   clearEngineActions() is the ONLY correct place to null callbacks, and
+  //   it is called only in IFCViewer's useEffect cleanup (component unmount).
   //
   resetModel: () => set({
     ifcObjects:      [],
@@ -191,8 +278,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     modelFileSize:   null,
     renderMode:      'perspective',
     wireframeActive: false,
-    // zoomToObject, isolateObjects, and all camera actions are intentionally
-    // NOT reset here — see comment above.
+    // zoomToObject, isolateObjects, setCameraPerspective, setCameraTop,
+    // setCameraFront, setWireframe — intentionally NOT reset here.
   }),
 
   getObjectByGlobalId: (globalId) =>

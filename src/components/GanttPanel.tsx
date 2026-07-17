@@ -1,14 +1,43 @@
-import { useMemo } from 'react'
-import { useActivityStore }  from '../store/activity.store'
-import { useSelectionStore } from '../store/selection.store'
-import { useSimulationStore } from '../store/simulation.store'
-import { useActivities }     from '../hooks/useActivities'
-import type { Activity }     from '../types'
+/**
+ * GanttPanel — Custom SVG/HTML Gantt chart for the 4D BIM schedule.
+ *
+ * Responsibilities:
+ * - Renders a horizontal bar chart of all activities.
+ * - Shows the current simulation date as a "NOW" marker.
+ * - Colours bars by simulation status (future / active / completed).
+ * - Supports bidirectional selection:
+ *     • Clicking a bar selects the activity (and its linked IFC objects).
+ *     • Selecting an IFC object in the viewer highlights its activities.
+ * - Handles loading, empty, and error states.
+ *
+ * Performance notes:
+ * - `deriveProjectRange` and `computeAllFrames` are wrapped in `useMemo`
+ *   to avoid recomputation on unrelated renders.
+ * - The component calls `useActivities()` which React Query deduplicates —
+ *   calling it here AND in ActivityPanel results in a single network request.
+ *
+ * @module GanttPanel
+ */
+
+import { useMemo, useCallback, memo } from 'react'
+import { useActivityStore }           from '../store/activity.store'
+import { useSelectionStore }          from '../store/selection.store'
+import { useSimulationStore }         from '../store/simulation.store'
+import { useActivities }              from '../hooks/useActivities'
+import { LoadingSpinner }             from './ui/LoadingSpinner'
+import { EmptyState }                 from './ui/EmptyState'
+import { ErrorMessage }               from './ui/ErrorMessage'
+import type { Activity }              from '../types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+/** Width reserved for the task label column in pixels */
 const LABEL_WIDTH = 160
+
+/** Abbreviated month names for the calendar header */
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+/** Simulation status → display colour mapping */
 const STATUS_COLOR: Record<string, string> = {
   completed: '#2ECC71',
   active:    '#2F6BFF',
@@ -17,6 +46,15 @@ const STATUS_COLOR: Record<string, string> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Converts an ISO date string to a percentage position within a time range.
+ * Clamps the result to [0, 100].
+ *
+ * @param dateStr    - ISO date string (e.g. "2026-03-15")
+ * @param rangeStart - Range start time in milliseconds (Date.getTime())
+ * @param rangeEnd   - Range end time in milliseconds
+ * @returns Position as a percentage in [0, 100]
+ */
 function dateToPercent(dateStr: string, rangeStart: number, rangeEnd: number): number {
   const t    = new Date(dateStr).getTime()
   const span = rangeEnd - rangeStart
@@ -26,12 +64,15 @@ function dateToPercent(dateStr: string, rangeStart: number, rangeEnd: number): n
 
 /**
  * Derives the project date range from the loaded activities.
+ * Adds one-month padding on each side for visual breathing room.
  * Falls back to the current calendar year when no activities are loaded.
+ *
+ * @param activities - Array of all loaded activities
+ * @returns { start, end } timestamps in milliseconds
  */
 function deriveProjectRange(activities: Activity[]): { start: number; end: number } {
   if (activities.length === 0) {
-    const now   = new Date()
-    const year  = now.getFullYear()
+    const year = new Date().getFullYear()
     return {
       start: new Date(`${year}-01-01`).getTime(),
       end:   new Date(`${year}-12-31`).getTime(),
@@ -40,6 +81,7 @@ function deriveProjectRange(activities: Activity[]): { start: number; end: numbe
 
   let min = Infinity
   let max = -Infinity
+
   for (const a of activities) {
     const s = new Date(a.startDate).getTime()
     const e = new Date(a.endDate).getTime()
@@ -47,17 +89,127 @@ function deriveProjectRange(activities: Activity[]): { start: number; end: numbe
     if (e > max) max = e
   }
 
-  // Add one-month padding on each side
+  // One-month padding on each side
   const padding = 30 * 24 * 60 * 60 * 1000
   return { start: min - padding, end: max + padding }
 }
 
+// ── GanttRow ──────────────────────────────────────────────────────────────────
+
+interface GanttRowProps {
+  activity:    Activity
+  rangeStart:  number
+  rangeEnd:    number
+  nowPct:      number
+  isFirst:     boolean
+  isSelected:  boolean
+  isHighlighted: boolean
+  statusColor: string
+  onClick:     (activity: Activity) => void
+}
+
+/**
+ * A single row in the Gantt chart.
+ * Memoised to avoid re-rendering all rows when only the selection changes.
+ */
+const GanttRow = memo(function GanttRow({
+  activity,
+  rangeStart,
+  rangeEnd,
+  nowPct,
+  isFirst,
+  isSelected,
+  isHighlighted,
+  statusColor,
+  onClick,
+}: GanttRowProps) {
+  const startPct = dateToPercent(activity.startDate, rangeStart, rangeEnd)
+  const endPct   = dateToPercent(activity.endDate,   rangeStart, rangeEnd)
+  const widthPct = Math.max(0.5, endPct - startPct)
+
+  // Determine if the bar is in a "future" low-opacity state
+  const isFuture = statusColor === STATUS_COLOR.future
+
+  const handleClick = useCallback(() => {
+    onClick(activity)
+  }, [activity, onClick])
+
+  return (
+    <div
+      className={[
+        'gantt-row',
+        isSelected                      ? 'selected'    : '',
+        isHighlighted && !isSelected    ? 'highlighted' : '',
+      ].join(' ').trim()}
+      style={{ gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }}
+      onClick={handleClick}
+      role="row"
+      aria-selected={isSelected}
+    >
+      {/* Label column */}
+      <div className="gantt-task-label">
+        <div
+          className="gantt-status-dot"
+          style={{ background: statusColor }}
+          aria-hidden="true"
+        />
+        <span className="gantt-task-name" title={activity.name}>
+          {activity.name}
+        </span>
+      </div>
+
+      {/* Bar column */}
+      <div className="gantt-bar-cell" style={{ position: 'relative' }}>
+
+        {/* "NOW" marker — rendered only on the first row to avoid duplication */}
+        {isFirst && nowPct >= 0 && nowPct <= 100 && (
+          <>
+            <div className="gantt-now-line"  style={{ left: `${nowPct}%` }} aria-hidden="true" />
+            <div className="gantt-now-label" style={{ left: `${nowPct}%` }} aria-hidden="true">NOW</div>
+          </>
+        )}
+
+        {/* Activity bar */}
+        <div
+          className="gantt-bar"
+          role="cell"
+          aria-label={`${activity.name}: ${activity.startDate} to ${activity.endDate}`}
+          style={{
+            left:       `${startPct}%`,
+            width:      `${widthPct}%`,
+            background: activity.color,
+            opacity:    isFuture ? 0.45 : 1,
+            boxShadow:  isSelected
+              ? `0 0 0 2px #fff, 0 0 12px ${activity.color}`
+              : '0 2px 6px rgba(0,0,0,0.3)',
+          }}
+        >
+          {widthPct > 8 && (
+            <span className="gantt-bar__label">{activity.name}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+})
+
 // ── GanttPanel ────────────────────────────────────────────────────────────────
 
+/**
+ * Main Gantt panel component.
+ *
+ * State machine:
+ *   loading  → LoadingSpinner
+ *   error    → ErrorMessage with retry
+ *   empty    → EmptyState with guidance
+ *   populated → GanttRow list
+ */
 export default function GanttPanel() {
-  // Trigger fetch + sync to store (React Query deduplicates if already mounted)
-  const { isLoading, isError } = useActivities()
+  // ── Data fetching ────────────────────────────────────────
+  // React Query deduplicates this call if ActivityPanel already fetched it.
+  const { isLoading, isError, error, refetch } = useActivities()
 
+  // ── Store reads ──────────────────────────────────────────
   const activities         = useActivityStore(s => s.activities)
   const isLoaded           = useActivityStore(s => s.isLoaded)
   const selectedActivityId = useSelectionStore(s => s.selectedActivityId)
@@ -66,7 +218,8 @@ export default function GanttPanel() {
   const currentDate        = useSimulationStore(s => s.currentDate)
   const computeAllFrames   = useSimulationStore(s => s.computeAllFrames)
 
-  // Derive date range from actual activities
+  // ── Derived values ───────────────────────────────────────
+
   const { start: rangeStart, end: rangeEnd } = useMemo(
     () => deriveProjectRange(activities),
     [activities]
@@ -77,62 +230,74 @@ export default function GanttPanel() {
     [currentDate, rangeStart, rangeEnd]
   )
 
-  // Compute all simulation frames once per render
+  /**
+   * Compute all simulation frames at the current date.
+   * Memoised on activities + currentDate to avoid per-render recomputation.
+   */
   const frames = useMemo(
     () => computeAllFrames(activities),
-    [computeAllFrames, activities]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activities, currentDate]
   )
 
-  const handleActivityClick = (activity: Activity) => {
+  const handleActivityClick = useCallback((activity: Activity) => {
     selectActivity(activity.id, activity.linkedGlobalIds[0])
-  }
+  }, [selectActivity])
 
-  // ── Loading state ─────────────────────────────────────────
+  const handleRetry = useCallback(() => {
+    void refetch()
+  }, [refetch])
+
+  // ── State renders ────────────────────────────────────────
+
   if (isLoading && !isLoaded) {
     return (
       <div className="gantt-wrap gantt-wrap--state">
-        <div className="gantt-state">
-          <div className="gantt-state__spinner" />
-          <span className="gantt-state__text">Loading activities…</span>
-        </div>
+        <LoadingSpinner message="Loading schedule…" />
       </div>
     )
   }
 
-  // ── Error state ───────────────────────────────────────────
   if (isError) {
     return (
       <div className="gantt-wrap gantt-wrap--state">
-        <div className="gantt-state gantt-state--error">
-          ⚠️ Failed to load activities
-        </div>
+        <ErrorMessage
+          message={(error as Error)?.message ?? 'Failed to load activities'}
+          context="GanttPanel"
+          onRetry={handleRetry}
+        />
       </div>
     )
   }
 
-  // ── Empty state ───────────────────────────────────────────
   if (isLoaded && activities.length === 0) {
     return (
       <div className="gantt-wrap gantt-wrap--state">
-        <div className="gantt-empty">
-          <div className="gantt-empty__icon">📅</div>
-          <p className="gantt-empty__title">No Activities</p>
-          <p className="gantt-empty__hint">
-            Create activities in the <strong>Activities</strong> tab to see them here.
-          </p>
-        </div>
+        <EmptyState
+          icon="📅"
+          title="No Scheduled Activities"
+          hint={
+            <>
+              Create activities in the <strong>Activities</strong> tab.<br />
+              They will appear here once saved.
+            </>
+          }
+        />
       </div>
     )
   }
 
+  // ── Main chart ───────────────────────────────────────────
+
   return (
-    <div className="gantt-wrap">
+    <div className="gantt-wrap" role="table" aria-label="Construction schedule Gantt chart">
       <div className="gantt-chart">
 
-        {/* ── Month header ─────────────────────────────────── */}
+        {/* Month header */}
         <div
           className="gantt-month-header"
           style={{ gridTemplateColumns: `${LABEL_WIDTH}px repeat(12, 1fr)` }}
+          role="row"
         >
           <div style={{
             borderRight: '1px solid var(--border-color)',
@@ -144,84 +309,35 @@ export default function GanttPanel() {
             TASK
           </div>
           {MONTHS.map(m => (
-            <div key={m} className="gantt-month-cell">{m}</div>
+            <div key={m} className="gantt-month-cell" role="columnheader">{m}</div>
           ))}
         </div>
 
-        {/* ── Activity rows ─────────────────────────────────── */}
+        {/* Activity rows */}
         {activities.map((activity, idx) => {
-          const startPct = dateToPercent(activity.startDate, rangeStart, rangeEnd)
-          const endPct   = dateToPercent(activity.endDate,   rangeStart, rangeEnd)
-          const widthPct = Math.max(0.5, endPct - startPct)
-
-          // Status from the first linked object's simulation frame
-          const firstFrame = activity.linkedGlobalIds[0]
+          const firstFrame   = activity.linkedGlobalIds[0]
             ? frames.get(activity.linkedGlobalIds[0])
             : undefined
-          const status      = firstFrame?.status ?? 'future'
-          const statusColor = STATUS_COLOR[status]
-
-          const isSelected    = selectedActivityId === activity.id
-          const isHighlighted = primaryGlobalId !== null &&
+          const status       = firstFrame?.status ?? 'future'
+          const statusColor  = STATUS_COLOR[status] ?? STATUS_COLOR.future
+          const isSelected   = selectedActivityId === activity.id
+          const isHighlighted =
+            primaryGlobalId !== null &&
             activity.linkedGlobalIds.includes(primaryGlobalId)
 
           return (
-            <div
+            <GanttRow
               key={activity.id}
-              className={[
-                'gantt-row',
-                isSelected                      ? 'selected'    : '',
-                isHighlighted && !isSelected    ? 'highlighted' : '',
-              ].join(' ').trim()}
-              style={{ gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }}
-              onClick={() => handleActivityClick(activity)}
-            >
-              {/* Label column */}
-              <div className="gantt-task-label">
-                <div
-                  className="gantt-status-dot"
-                  style={{ background: statusColor }}
-                />
-                <span
-                  className="gantt-task-name"
-                  title={activity.name}
-                >
-                  {activity.name}
-                </span>
-              </div>
-
-              {/* Bar column */}
-              <div className="gantt-bar-cell" style={{ position: 'relative' }}>
-
-                {/* "NOW" line — only on first row to avoid duplication */}
-                {idx === 0 && nowPct >= 0 && nowPct <= 100 && (
-                  <>
-                    <div className="gantt-now-line"  style={{ left: `${nowPct}%` }} />
-                    <div className="gantt-now-label" style={{ left: `${nowPct}%` }}>NOW</div>
-                  </>
-                )}
-
-                {/* Activity bar */}
-                <div
-                  className="gantt-bar"
-                  style={{
-                    left:       `${startPct}%`,
-                    width:      `${widthPct}%`,
-                    background: activity.color,
-                    opacity:    status === 'future' ? 0.45 : 1,
-                    boxShadow:  isSelected
-                      ? `0 0 0 2px #fff, 0 0 12px ${activity.color}`
-                      : '0 2px 6px rgba(0,0,0,0.3)',
-                  }}
-                >
-                  {widthPct > 8 && (
-                    <span className="gantt-bar__label">
-                      {activity.name}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
+              activity={activity}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              nowPct={nowPct}
+              isFirst={idx === 0}
+              isSelected={isSelected}
+              isHighlighted={isHighlighted}
+              statusColor={statusColor}
+              onClick={handleActivityClick}
+            />
           )
         })}
       </div>

@@ -1,8 +1,15 @@
 /**
- * App.tsx is intentionally minimal.
- * It exists as the entry point for future router and provider composition.
- * All layout lives in Layout.tsx.
+ * App.tsx — Top-level application component.
+ *
+ * Intentionally minimal. Its sole purpose is to serve as the composition
+ * root for any future router or provider layers that sit above Layout.
+ *
+ * All application layout and panel composition lives in Layout.tsx.
+ * All providers (QueryProvider, ErrorBoundary) live in main.tsx.
+ *
+ * @module App
  */
+
 import Layout from '../components/Layout'
 
 export default function App() {

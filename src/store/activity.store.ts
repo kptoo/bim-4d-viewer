@@ -1,53 +1,121 @@
+/**
+ * activity.store.ts — Zustand store for construction schedule activities.
+ *
+ * Architecture:
+ * - React Query is the source of truth for server data.
+ * - This store is the synchronised in-memory cache consumed by components.
+ * - The `linkMap` is pre-computed whenever activities are updated, providing
+ *   O(1) lookups for both directions of the activity ↔ IFC object relationship.
+ *
+ * Update flow:
+ *   DB fetch → useActivities() hook → setActivities() → store + linkMap rebuild
+ *
+ * Optimistic updates:
+ * - addActivity, updateActivity, deleteActivity apply changes locally.
+ * - The real data arrives via setActivities() after React Query invalidation.
+ * - This gives instant UI feedback while the server processes the write.
+ *
+ * @module activity.store
+ */
+
 import { create }            from 'zustand'
 import { ActivityLinker }    from '../core/ifc/ActivityLinker'
-import type { Activity, CreateActivityPayload, UpdateActivityPayload } from '../types'
-import type { LinkMap }      from '../core/ifc/ActivityLinker'
+import type {
+  Activity,
+  CreateActivityPayload,
+  UpdateActivityPayload,
+} from '../types'
+import type { LinkMap } from '../core/ifc/ActivityLinker'
+
+// ── State shape ───────────────────────────────────────────────────────────────
 
 interface ActivityState {
-  /** All activities loaded from the database */
+  /** All activities loaded from the database. Ordered by start_date ASC. */
   activities: Activity[]
-  /** Pre-computed bidirectional link map for O(1) lookups */
-  linkMap:    LinkMap
-  /** Whether the initial DB fetch has completed */
-  isLoaded:   boolean
+
+  /**
+   * Pre-computed bidirectional link map for O(1) lookups.
+   * Rebuilt whenever `activities` changes via setActivities().
+   */
+  linkMap: LinkMap
+
+  /**
+   * Whether the initial DB fetch has completed.
+   * Used to distinguish "loading" from "loaded + empty".
+   */
+  isLoaded: boolean
 
   // ── Actions ──────────────────────────────────────────────
 
   /**
-   * Called by useActivities() hook after a successful DB fetch.
-   * Replaces the current in-memory list and rebuilds the link map.
+   * Replaces the activity list with fresh data from the database.
+   * Called by the useActivities() hook after a successful fetch.
+   * Also rebuilds the linkMap and sets isLoaded = true.
+   *
+   * @param activities - Fresh activity array from the DB
    */
   setActivities: (activities: Activity[]) => void
 
   /**
-   * Optimistic local add — used by useCreateActivity mutation's onMutate.
-   * The real data arrives via setActivities() after cache invalidation.
+   * Optimistically adds a new activity to the local list.
+   * A temporary ID is assigned — overwritten when the real data arrives
+   * via setActivities() after React Query invalidation.
+   *
+   * @param payload - Activity creation payload (no id/timestamps)
    */
   addActivity: (payload: CreateActivityPayload) => void
 
   /**
-   * Optimistic local update — used by useUpdateActivity mutation's onMutate.
+   * Optimistically updates an existing activity in the local list.
+   * Applies a partial update — only provided fields are changed.
+   *
+   * @param payload - Partial activity with required `id`
    */
   updateActivity: (payload: UpdateActivityPayload) => void
 
   /**
-   * Optimistic local delete — used by useDeleteActivity mutation's onMutate.
+   * Optimistically removes an activity from the local list by ID.
+   *
+   * @param id - Activity UUID to remove
    */
   deleteActivity: (id: string) => void
 
-  /** Selector: returns an activity by ID, or undefined */
+  /**
+   * Returns a single activity by its UUID.
+   * Returns undefined if not found.
+   *
+   * @param id - Activity UUID
+   */
   getActivityById: (id: string) => Activity | undefined
 
-  /** Selector: returns all activities linked to an IFC object */
+  /**
+   * Returns all activities linked to a specific IFC object.
+   * Uses the pre-computed linkMap for O(1) lookup.
+   *
+   * @param globalId - IFC object GlobalId
+   */
   getActivitiesForObject: (globalId: string) => Activity[]
 
-  /** Selector: returns all IFC GlobalIds linked to an activity */
+  /**
+   * Returns all IFC GlobalIds linked to a specific activity.
+   * Uses the pre-computed linkMap for O(1) lookup.
+   *
+   * @param activityId - Activity UUID
+   */
   getObjectsForActivity: (activityId: string) => string[]
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Builds the bidirectional link map from an activity array.
+ * Extracted as a named function for clarity.
+ */
 function buildLinkMap(activities: Activity[]): LinkMap {
   return ActivityLinker.buildLinkMap(activities)
 }
+
+// ── Store ─────────────────────────────────────────────────────────────────────
 
 export const useActivityStore = create<ActivityState>((set, get) => ({
   activities: [],
@@ -58,7 +126,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ activities, linkMap: buildLinkMap(activities), isLoaded: true }),
 
   addActivity: (payload) => {
-    // Generate a temporary ID — overwritten when the real data arrives
+    // Temporary ID — replaced when the real data arrives from the DB
     const tempActivity: Activity = {
       ...payload,
       id:        `temp-${Date.now()}`,
@@ -87,8 +155,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     get().activities.find(a => a.id === id),
 
   getActivitiesForObject: (globalId) => {
-    const ids = ActivityLinker.getActivitiesForObject(globalId, get().linkMap)
-    return ids
+    const activityIds = ActivityLinker.getActivitiesForObject(globalId, get().linkMap)
+    return activityIds
       .map(id => get().activities.find(a => a.id === id))
       .filter((a): a is Activity => a !== undefined)
   },

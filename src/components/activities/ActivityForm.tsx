@@ -1,9 +1,36 @@
-import { useState, useCallback, useEffect } from 'react'
-import { useCreateActivity, useUpdateActivity, useDeleteActivity } from '../../hooks/useActivities'
+/**
+ * ActivityForm — Create and edit construction schedule activities.
+ *
+ * Supports two modes:
+ * - **Create mode** (no `activity` prop) — creates a new activity.
+ * - **Edit mode** (`activity` prop provided) — edits an existing activity.
+ *
+ * Validation:
+ * - Name is required, max 120 characters.
+ * - Start date and end date are required.
+ * - End date must be on or after the start date.
+ * - Validation runs on submit, not on each keystroke.
+ *
+ * Architecture:
+ * - Uses useCreateActivity / useUpdateActivity / useDeleteActivity mutations.
+ * - Does NOT manage linked IFC objects — linking is handled separately via
+ *   the ZoneAssignWidget-equivalent in the Inspector panel.
+ * - Calls `onClose()` after a short success-feedback delay so the user
+ *   can see the confirmation before the form closes.
+ *
+ * @module ActivityForm
+ */
+
+import { useState, useCallback, useEffect, memo } from 'react'
+import {
+  useCreateActivity,
+  useUpdateActivity,
+  useDeleteActivity,
+} from '../../hooks/useActivities'
 import { useSelectionStore }   from '../../store/selection.store'
 import type { Activity }       from '../../types'
 
-// ── Colour palette (same as ZonePanel) ───────────────────────────────────────
+// ── Color palette ─────────────────────────────────────────────────────────────
 
 const PALETTE = [
   '#E67E22', '#3498DB', '#9B59B6', '#1ABC9C', '#E74C3C',
@@ -23,6 +50,14 @@ interface FormErrors {
   endDate?:   string
 }
 
+/**
+ * Validates the activity form fields.
+ * Returns an empty object if all fields are valid.
+ *
+ * @param name      - Activity name (trimmed)
+ * @param startDate - ISO date string or empty string
+ * @param endDate   - ISO date string or empty string
+ */
 function validateForm(
   name:      string,
   startDate: string,
@@ -60,7 +95,11 @@ interface ActivityFormProps {
 
 // ── ActivityForm ──────────────────────────────────────────────────────────────
 
-export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
+/**
+ * Create/edit activity form.
+ * Memoised to prevent re-renders when parent panel re-renders.
+ */
+export default memo(function ActivityForm({ activity, onClose }: ActivityFormProps) {
   const isEditMode = Boolean(activity)
 
   // ── Form state ──────────────────────────────────────────────
@@ -71,7 +110,8 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
   const [errors,    setErrors]    = useState<FormErrors>({})
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-  // Reset form when activity prop changes (switching between edit targets)
+  // Reset form fields when the activity prop changes
+  // (e.g. user switches from editing Activity A to Activity B)
   useEffect(() => {
     if (activity) {
       setName(activity.name)
@@ -99,7 +139,8 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
     updateMutation.isPending ||
     deleteMutation.isPending
 
-  // ── Submit ──────────────────────────────────────────────────
+  // ── Submit handler ──────────────────────────────────────────
+
   const handleSubmit = useCallback(() => {
     const trimmedName = name.trim()
     const validationErrors = validateForm(trimmedName, startDate, endDate)
@@ -119,16 +160,15 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
           startDate,
           endDate,
           color,
-          // linkedGlobalIds intentionally NOT included here — linking is
-          // managed by the ZoneAssignWidget-equivalent in the Inspector panel.
-          // Updating links here would overwrite assignments made elsewhere.
+          // linkedGlobalIds is NOT updated here — linking is managed
+          // via the separate IFC object assignment panel.
         },
         {
           onSuccess: () => {
             setTimeout(() => {
               updateMutation.reset()
               onClose?.()
-            }, 1500)
+            }, 1200)
           },
         }
       )
@@ -144,7 +184,7 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
         },
         {
           onSuccess: () => {
-            // Reset form for next create
+            // Reset form for the next create
             setName('')
             setStartDate('')
             setEndDate('')
@@ -152,7 +192,7 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
             setTimeout(() => {
               createMutation.reset()
               onClose?.()
-            }, 1500)
+            }, 1200)
           },
         }
       )
@@ -162,7 +202,8 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
     createMutation, updateMutation, onClose,
   ])
 
-  // ── Delete ──────────────────────────────────────────────────
+  // ── Delete handler ──────────────────────────────────────────
+
   const handleDelete = useCallback(() => {
     if (!activity) return
 
@@ -170,7 +211,6 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
       activity.id,
       {
         onSuccess: () => {
-          // Clear selection if this activity was selected
           clearSelection()
           setTimeout(() => {
             deleteMutation.reset()
@@ -181,16 +221,24 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
     )
   }, [activity, deleteMutation, clearSelection, onClose])
 
-  // ── Shared mutation error ────────────────────────────────────
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleSubmit()
+  }, [handleSubmit])
+
+  // ── Derived state ───────────────────────────────────────────
+
   const mutationError =
     (createMutation.error ?? updateMutation.error ?? deleteMutation.error) as Error | null
 
   const isSuccess = createMutation.isSuccess || updateMutation.isSuccess
+  const isSubmitDisabled = isPending || !name.trim() || !startDate || !endDate
+
+  // ── Render ───────────────────────────────────────────────────
 
   return (
     <div className="act-form">
 
-      {/* ── Header ─────────────────────────────────────────── */}
+      {/* Header */}
       <div className="act-form__header">
         <span className="act-form__title">
           {isEditMode ? '✏️ Edit Activity' : '＋ New Activity'}
@@ -201,28 +249,31 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
             onClick={onClose}
             disabled={isPending}
             title="Close"
+            aria-label="Close form"
           >
             ✕
           </button>
         )}
       </div>
 
-      {/* ── Body ───────────────────────────────────────────── */}
+      {/* Body */}
       <div className="act-form__body">
 
-        {/* Name field */}
+        {/* Name + color */}
         <div className="act-form__field">
-          <label className="act-form__label">Activity Name</label>
+          <label className="act-form__label" htmlFor="act-name">Activity Name</label>
           <div className="act-form__name-row">
             <input
+              id="act-name"
               className={`act-form__input${errors.name ? ' act-form__input--error' : ''}`}
               type="text"
               placeholder="e.g. Foundation Works, Structural Frame…"
               value={name}
               onChange={e => setName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              onKeyDown={handleKeyDown}
               maxLength={120}
               disabled={isPending}
+              aria-describedby={errors.name ? 'act-name-error' : undefined}
             />
             <input
               type="color"
@@ -231,57 +282,69 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
               onChange={e => setColor(e.target.value)}
               title="Activity colour"
               disabled={isPending}
+              aria-label="Activity colour"
             />
           </div>
           {errors.name && (
-            <span className="act-form__field-error">{errors.name}</span>
+            <span id="act-name-error" className="act-form__field-error" role="alert">
+              {errors.name}
+            </span>
           )}
         </div>
 
         {/* Date range */}
         <div className="act-form__dates">
           <div className="act-form__field">
-            <label className="act-form__label">Start Date</label>
+            <label className="act-form__label" htmlFor="act-start">Start Date</label>
             <input
+              id="act-start"
               className={`act-form__input act-form__input--date${errors.startDate ? ' act-form__input--error' : ''}`}
               type="date"
               value={startDate}
               onChange={e => setStartDate(e.target.value)}
               disabled={isPending}
+              aria-describedby={errors.startDate ? 'act-start-error' : undefined}
             />
             {errors.startDate && (
-              <span className="act-form__field-error">{errors.startDate}</span>
+              <span id="act-start-error" className="act-form__field-error" role="alert">
+                {errors.startDate}
+              </span>
             )}
           </div>
 
           <div className="act-form__field">
-            <label className="act-form__label">End Date</label>
+            <label className="act-form__label" htmlFor="act-end">End Date</label>
             <input
+              id="act-end"
               className={`act-form__input act-form__input--date${errors.endDate ? ' act-form__input--error' : ''}`}
               type="date"
               value={endDate}
               min={startDate}
               onChange={e => setEndDate(e.target.value)}
               disabled={isPending}
+              aria-describedby={errors.endDate ? 'act-end-error' : undefined}
             />
             {errors.endDate && (
-              <span className="act-form__field-error">{errors.endDate}</span>
+              <span id="act-end-error" className="act-form__field-error" role="alert">
+                {errors.endDate}
+              </span>
             )}
           </div>
         </div>
 
-        {/* Colour preview strip */}
+        {/* Color preview */}
         <div
           className="act-form__color-preview"
           style={{ background: color }}
-          title={`Activity colour: ${color}`}
+          aria-hidden="true"
         />
 
-        {/* Submit */}
+        {/* Submit button */}
         <button
           className="act-form__submit"
           onClick={handleSubmit}
-          disabled={isPending || !name.trim() || !startDate || !endDate}
+          disabled={isSubmitDisabled}
+          aria-label={isEditMode ? 'Save changes' : 'Create activity'}
         >
           {isPending && !deleteMutation.isPending
             ? '…'
@@ -292,20 +355,20 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
 
         {/* Success feedback */}
         {isSuccess && (
-          <div className="act-form__success">
+          <div className="act-form__success" role="status">
             {isEditMode ? '✓ Activity updated' : '✓ Activity created'}
           </div>
         )}
 
-        {/* Error feedback */}
+        {/* Mutation error */}
         {mutationError && !deleteMutation.isError && (
-          <div className="act-form__error">
+          <div className="act-form__error" role="alert">
             {mutationError.message}
           </div>
         )}
       </div>
 
-      {/* ── Delete section (edit mode only) ────────────────── */}
+      {/* Delete section (edit mode only) */}
       {isEditMode && activity && (
         <div className="act-form__delete-zone">
           {!showDeleteConfirm ? (
@@ -313,6 +376,7 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
               className="act-form__delete-btn"
               onClick={() => setShowDeleteConfirm(true)}
               disabled={isPending}
+              aria-label={`Delete ${activity.name}`}
             >
               🗑 Delete Activity
             </button>
@@ -338,7 +402,7 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
                 </button>
               </div>
               {deleteMutation.isError && (
-                <div className="act-form__error">
+                <div className="act-form__error" role="alert">
                   {(deleteMutation.error as Error).message}
                 </div>
               )}
@@ -348,4 +412,4 @@ export default function ActivityForm({ activity, onClose }: ActivityFormProps) {
       )}
     </div>
   )
-}
+})

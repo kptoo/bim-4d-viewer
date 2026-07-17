@@ -1,3 +1,20 @@
+/**
+ * useLayers — React Query hooks for the Information Layer domain.
+ *
+ * Architecture:
+ * - React Query is the source of truth for server data.
+ * - Zustand (useLayerStore) is the synchronised local cache for layers.
+ * - Optimistic updates are applied for rename, color, and delete operations
+ *   to give instant UI feedback while the server processes the request.
+ *
+ * Optimistic update pattern:
+ *   1. onMutate:  Cancel in-flight queries, snapshot cache, apply optimistic update.
+ *   2. onError:   Roll back to the snapshot.
+ *   3. onSettled: Invalidate to sync with server truth.
+ *
+ * @module useLayers
+ */
+
 import {
   useQuery,
   useMutation,
@@ -20,18 +37,29 @@ import type {
   CreateLayerPayload,
 } from '../types'
 
-// ── Query keys ────────────────────────────────────────────────────────────────
+// ── Query key factory ─────────────────────────────────────────────────────────
 
+/**
+ * Centralised query key factory for the Layer domain.
+ */
 export const layerKeys = {
+  /** Key for the complete layers list */
   all:    ['layers']                     as const,
+  /** Key for assignment counts per layer */
   counts: ['layers', 'counts']           as const,
+  /** Key for a single layer by UUID */
   detail: (id: string) => ['layers', id] as const,
-}
+} as const
 
 // ── useLayers ─────────────────────────────────────────────────────────────────
 
 /**
  * Fetches all information layers and syncs them into the layer store.
+ *
+ * Called by LayerPanel. React Query deduplicates concurrent calls so
+ * multiple consumers share a single network request.
+ *
+ * @returns UseQueryResult<InformationLayer[]>
  */
 export function useLayers(): UseQueryResult<InformationLayer[]> {
   const setLayers = useLayerStore(s => s.setLayers)
@@ -41,8 +69,8 @@ export function useLayers(): UseQueryResult<InformationLayer[]> {
     queryFn:  fetchLayers,
   })
 
-  // Sync into Zustand on every successful fetch so FilterEngine
-  // continues to work via layer.store.layers.
+  // Sync fetched data into Zustand so FilterEngine continues to work
+  // via layer.store.layers (FilterEngine is not React-aware).
   useEffect(() => {
     if (query.data) {
       setLayers(query.data)
@@ -52,11 +80,15 @@ export function useLayers(): UseQueryResult<InformationLayer[]> {
   return query
 }
 
-// ── useLayerCounts ─────────────────────────────────────────────────────────────
+// ── useLayerCounts ────────────────────────────────────────────────────────────
 
 /**
  * Fetches assignment counts per layer.
- * Returns a Map<layerId, count>.
+ *
+ * Returns a Map<layerId, count> used for displaying "X elements" badges
+ * on each layer row in the UI.
+ *
+ * @returns UseQueryResult<Map<string, number>>
  */
 export function useLayerCounts(): UseQueryResult<Map<string, number>> {
   return useQuery<Map<string, number>>({
@@ -73,7 +105,12 @@ interface CreateLayerVariables {
 
 /**
  * Mutation hook for creating a new information layer.
- * Invalidates the layers list on success.
+ *
+ * On success:
+ * - Prepends the new layer to the React Query cache (optimistic feel).
+ * - Invalidates layer counts (the new layer has 0 assignments).
+ *
+ * @returns UseMutationResult<InformationLayer, Error, CreateLayerVariables>
  */
 export function useCreateLayer(): UseMutationResult<
   InformationLayer,
@@ -86,13 +123,18 @@ export function useCreateLayer(): UseMutationResult<
     mutationFn: ({ payload }) => createLayer(payload),
 
     onSuccess: (newLayer) => {
-      // Optimistically prepend to cache
+      // Optimistically prepend to the cache — avoids a round-trip refetch
       queryClient.setQueryData<InformationLayer[]>(
         layerKeys.all,
         (old = []) => [newLayer, ...old]
       )
-      // Invalidate counts
       void queryClient.invalidateQueries({ queryKey: layerKeys.counts })
+    },
+
+    onError: (error) => {
+      console.error('[useCreateLayer] Failed to create layer:', error.message)
+      // Invalidate to restore server state in case the optimistic update is stale
+      void queryClient.invalidateQueries({ queryKey: layerKeys.all })
     },
   })
 }
@@ -105,8 +147,14 @@ interface RenameLayerVariables {
 }
 
 /**
- * Mutation hook for renaming a layer.
- * Optimistically updates the cache.
+ * Mutation hook for renaming an information layer.
+ *
+ * Uses a full optimistic update pattern:
+ * - Applies the new name immediately in the cache.
+ * - Rolls back on server error.
+ * - Re-syncs with the server on settle.
+ *
+ * @returns UseMutationResult<InformationLayer | null, Error, RenameLayerVariables>
  */
 export function useRenameLayer(): UseMutationResult<
   InformationLayer | null,
@@ -135,6 +183,7 @@ export function useRenameLayer(): UseMutationResult<
       if (ctx?.previous) {
         queryClient.setQueryData(layerKeys.all, ctx.previous)
       }
+      console.error('[useRenameLayer] Failed:', _err.message)
     },
 
     onSettled: () => {
@@ -152,6 +201,11 @@ interface UpdateColorVariables {
 
 /**
  * Mutation hook for updating a layer's display color.
+ *
+ * Uses optimistic update: immediately applies the color change in the
+ * cache so the swatch updates without a round-trip delay.
+ *
+ * @returns UseMutationResult<InformationLayer | null, Error, UpdateColorVariables>
  */
 export function useUpdateLayerColor(): UseMutationResult<
   InformationLayer | null,
@@ -180,6 +234,7 @@ export function useUpdateLayerColor(): UseMutationResult<
       if (ctx?.previous) {
         queryClient.setQueryData(layerKeys.all, ctx.previous)
       }
+      console.error('[useUpdateLayerColor] Failed:', _err.message)
     },
 
     onSettled: () => {
@@ -191,9 +246,16 @@ export function useUpdateLayerColor(): UseMutationResult<
 // ── useDeleteLayer ────────────────────────────────────────────────────────────
 
 /**
- * Mutation hook for deleting a layer.
- * Optimistically removes it from the cache.
- * The database CASCADE handles associated assignments.
+ * Mutation hook for deleting an information layer.
+ * The database CASCADE rule removes all associated assignments automatically.
+ *
+ * Uses optimistic update: immediately removes the layer from the cache
+ * so the UI updates without waiting for the server.
+ *
+ * On success: clears any active filter that referenced the deleted layer.
+ *
+ * @returns UseMutationResult<boolean, Error, string>
+ *   The string variable is the layer UUID.
  */
 export function useDeleteLayer(): UseMutationResult<boolean, Error, string> {
   const queryClient = useQueryClient()
@@ -215,7 +277,7 @@ export function useDeleteLayer(): UseMutationResult<boolean, Error, string> {
     },
 
     onSuccess: () => {
-      // Clear any active filter referencing the deleted layer
+      // Clear filters — the deleted layer may have been an active filter
       clearFilter()
       void queryClient.invalidateQueries({ queryKey: layerKeys.counts })
     },
@@ -225,6 +287,7 @@ export function useDeleteLayer(): UseMutationResult<boolean, Error, string> {
       if (ctx?.previous) {
         queryClient.setQueryData(layerKeys.all, ctx.previous)
       }
+      console.error('[useDeleteLayer] Failed:', _err.message)
     },
 
     onSettled: () => {

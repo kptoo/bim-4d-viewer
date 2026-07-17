@@ -1,0 +1,114 @@
+/* ── LayerRow: inline color picker ───────────────────────────── */
+
+.layer-color-picker {
+  -webkit-appearance: none;
+  appearance:         none;
+  background:         none;
+  border:             none;
+  border-radius:      4px;
+  cursor:             pointer;
+  flex-shrink:        0;
+  height:             22px;
+  opacity:            0;
+  padding:            0;
+  transition:         opacity 0.15s;
+  width:              22px;
+}
+
+.layer-row:hover .layer-color-picker {
+  opacity: 1;
+}
+
+.layer-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.layer-color-picker::-webkit-color-swatch {
+  border:        2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+/* ── LayerPanel loading state ─────────────────────────────────── */
+
+.layer-loading {
+  align-items: center;
+  color:       var(--text-secondary);
+  display:     flex;
+  font-size:   12px;
+  gap:         8px;
+  padding:     16px 14px;
+}
+
+/* ── LayerPanel inline error ──────────────────────────────────── */
+
+.layer-error {
+  background:    rgba(231, 76, 60, 0.1);
+  border:        1px solid rgba(231, 76, 60, 0.25);
+  border-radius: 6px;
+  color:         #e74c3c;
+  font-size:     11px;
+  margin:        8px 14px;
+  padding:       8px 10px;
+}
+
+/* ── LayerPanel active filter indicator ──────────────────────── */
+
+.layer-filter-indicator {
+  border-top:  1px solid var(--border-color);
+  color:       var(--text-secondary);
+  font-size:   11px;
+  margin-top:  8px;
+  padding:     10px 14px;
+  text-align:  center;
+}
+
+/* ── Gantt loading state ──────────────────────────────────────── */
+
+.gantt-wrap--state {
+  align-items:     center;
+  display:         flex;
+  height:          100%;
+  justify-content: center;
+  width:           100%;
+}
+
+/* ── Gantt empty state ────────────────────────────────────────── */
+
+.gantt-empty {
+  padding:    32px 20px;
+  text-align: center;
+}
+
+.gantt-empty__icon {
+  font-size:     28px;
+  margin-bottom: 10px;
+}
+
+.gantt-empty__title {
+  color:         var(--text-primary);
+  font-size:     13px;
+  font-weight:   600;
+  margin-bottom: 6px;
+}
+
+.gantt-empty__hint {
+  color:       var(--text-secondary);
+  font-size:   11px;
+  line-height: 1.5;
+}
+
+.gantt-empty__hint strong {
+  color: var(--text-primary);
+}
+
+/* ── Gantt error state ────────────────────────────────────────── */
+
+.gantt-state--error {
+  align-items:  center;
+  color:        #e74c3c;
+  display:      flex;
+  font-size:    12px;
+  gap:          8px;
+  padding:      16px;
+  text-align:   center;
+}

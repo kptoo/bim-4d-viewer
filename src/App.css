@@ -2,6 +2,7 @@
 @import './styles/layers.css';
 @import './styles/zones.css';
 @import './styles/activities.css';
+@import './styles/phase5-additions.css';
 
 :root {
   --bg-primary: #0D1117;
