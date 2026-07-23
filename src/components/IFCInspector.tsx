@@ -1,3 +1,24 @@
+/**
+ * IFCInspector.tsx — IFC element property inspector panel.
+ *
+ * Phase 6 selection UX change:
+ * - Removed `const [isIsolated, setIsIsolated] = useState(false)`.
+ * - Now reads `isIsolated` and `setIsIsolated` from `useViewerStore`.
+ *
+ *   Previously, isolation state lived as local React state inside this
+ *   component. That meant only IFCInspector could know whether the model
+ *   was isolated. SelectionLabel couldn't show a "Show All" button.
+ *   IFCViewer's Escape handler couldn't clear the isolation flag.
+ *   The Escape key would clear the selection but leave the model isolated.
+ *
+ *   Moving `isIsolated` to viewer.store makes it a single observable truth
+ *   shared by IFCInspector, SelectionLabel, and IFCViewer's Escape handler.
+ *   The Isolate/Show All button in the Inspector still works identically —
+ *   it just reads from and writes to the store instead of local state.
+ *
+ * @module IFCInspector
+ */
+
 import {
   useState, useCallback, useMemo, memo,
 } from 'react'
@@ -204,37 +225,23 @@ export default function IFCInspector() {
   const computeAllFrames       = useSimulationStore(s => s.computeAllFrames)
   const activities             = useActivityStore(s => s.activities)
 
-  // ── Assignments — subscribe to the same React Query cache entry ───────────
+  // ── Isolation state — now from viewer.store, not local useState ───────────
   //
-  // ROOT CAUSE OF THE BUG:
-  // IFCInspector read zone data via getLayersForObject(), which reads from
-  // layer.store.assignments. That store is populated by useAllAssignments()
-  // in IFCViewer.tsx — but the fetch is asynchronous. When the user selects
-  // an element immediately after model load, the fetch may not have completed
-  // yet, so assignments = [] and getLayersForObject() returns [].
+  // Previously: const [isIsolated, setIsIsolated] = useState(false)
   //
-  // Opening ExistingZonesPanel didn't fix the data — it just allowed enough
-  // time for the background fetch to complete and call setAssignments().
+  // The isolation state is now shared via viewer.store so that:
+  // - SelectionLabel can show a "Show All" button without opening this panel.
+  // - IFCViewer's Escape handler can clear isolation state in one keystroke.
+  // - All three UI surfaces always agree on the current isolation state.
   //
-  // THE FIX:
-  // Call useAllAssignments() here. React Query deduplicates by queryKey —
-  // this does NOT fire a second network request. It simply subscribes this
-  // component to the same cache entry already being managed by IFCViewer.
-  // IFCInspector now knows whether the data is loading (isLoading) and
-  // re-renders automatically the moment assignments arrive in the cache.
-  //
-  // This makes IFCInspector self-sufficient: it displays correct zone counts
-  // immediately after selection, with no dependency on ExistingZonesPanel
-  // being mounted or any tab-switching by the user.
-  //
-  // The getLayersForObject() call still reads from the Zustand store (which
-  // useAllAssignments populates via its useEffect), so the data path is
-  // identical — we just ensure we re-render when it becomes available.
+  // The handleIsolate callback below is unchanged in behaviour — it still
+  // calls isolateObjects([]) or isolateObjects(targets) and toggles the flag.
+  // It just reads/writes the store instead of local state.
+  const isIsolated    = useViewerStore(s => s.isIsolated)
+  const setIsIsolated = useViewerStore(s => s.setIsIsolated)
 
+  // ── Assignments ───────────────────────────────────────────
   const { isLoading: assignmentsLoading } = useAllAssignments()
-
-  // ── Isolation toggle ───────────────────────────────────────
-  const [isIsolated, setIsIsolated] = useState(false)
 
   const ifcObject: IFCObject | undefined | null = primaryGlobalId
     ? getObjectByGlobalId(primaryGlobalId)
@@ -246,9 +253,6 @@ export default function IFCInspector() {
       ? getActivitiesForObject(ifcObject.globalId)[0]
       : undefined
 
-  // Zones assigned to this object.
-  // getLayersForObject reads from layer.store.assignments, which is now
-  // guaranteed to be populated because we subscribe to useAllAssignments().
   const assignedZones = ifcObject ? getLayersForObject(ifcObject.globalId) : []
 
   const frames = computeAllFrames(activities)
@@ -297,7 +301,7 @@ export default function IFCInspector() {
       isolateObjects(targets)
       setIsIsolated(true)
     }
-  }, [ifcObject, isolateObjects, isIsolated, selectedGlobalIds])
+  }, [ifcObject, isolateObjects, isIsolated, setIsIsolated, selectedGlobalIds])
 
   // ── Empty state ───────────────────────────────────────────
   if (!ifcObject) {
@@ -371,18 +375,7 @@ export default function IFCInspector() {
         </button>
       </div>
 
-      {/*
-        ── Zone Assignment ─────────────────────────────────────────────────────
-        The badge count is derived from assignedZones (Zustand store).
-        While the assignments query is still loading, show a "…" placeholder
-        so the user knows data is incoming rather than seeing a stale 0.
-
-        ZoneAssignWidget uses useAssignmentsByGlobalId() internally — a
-        per-object query that is also deduplicated by React Query. Both
-        the badge here and the widget's list are always in sync because
-        mutations in ZoneAssignWidget invalidate assignmentKeys.all,
-        which triggers a refetch that updates both this badge and the list.
-      */}
+      {/* ── Zone Assignment ───────────────────────────────────── */}
       <Section
         title="Zone Assignment"
         defaultOpen={true}

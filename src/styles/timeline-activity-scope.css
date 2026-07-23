@@ -1,0 +1,62 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   Activity-scoped timeline banner
+   Append to src/styles/phase5-additions.css (or workspace.css)
+   ════════════════════════════════════════════════════════════════════════════
+
+   Shown inside .timeline-panel when the timeline is scoped to a single
+   selected activity. Gives the user clear visual confirmation of which
+   activity is driving the playback range.                                   */
+
+.timeline-scope-banner {
+  align-items:    center;
+  background:     rgba(47, 107, 255, 0.08);
+  border-bottom:  1px solid rgba(47, 107, 255, 0.18);
+  display:        flex;
+  gap:            8px;
+  padding:        5px 14px;
+  flex-shrink:    0;
+  flex-wrap:      wrap;
+}
+
+.timeline-scope-banner__icon {
+  font-size:   13px;
+  flex-shrink: 0;
+}
+
+.timeline-scope-banner__label {
+  color:       var(--text-primary);
+  font-size:   11px;
+  flex:        1;
+  min-width:   0;
+  overflow:    hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-scope-banner__label strong {
+  color:       var(--accent-blue);
+  font-weight: 700;
+}
+
+.timeline-scope-banner__hint {
+  color:       var(--text-secondary);
+  font-size:   10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Project date range labels below the scrubber track (from previous iteration) */
+.timeline-date-range {
+  display:         flex;
+  justify-content: space-between;
+  margin-top:      4px;
+  padding:         0 2px;
+}
+
+.timeline-date-range__start,
+.timeline-date-range__end {
+  font-size:      9px;
+  color:          var(--text-secondary);
+  letter-spacing: 0.3px;
+  white-space:    nowrap;
+}

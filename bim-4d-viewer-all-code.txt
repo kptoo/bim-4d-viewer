@@ -5223,6 +5223,7 @@ FILE: src\App.css
 @import './styles/zones.css';
 @import './styles/activities.css';
 @import './styles/phase5-additions.css';
+@import './styles/workspace.css';
 
 :root {
   --bg-primary: #0D1117;
@@ -5262,7 +5263,9 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
-/* ─── LAYOUT ─────────────────────────────────────────────── */
+/* Legacy Phase 5 grid — superseded by .bim-layout-v6 in Phase 6.
+   Keep this rule so any component that still uses class="bim-layout"
+   doesn't break during migration. */
 .bim-layout {
   display: grid;
   grid-template-rows: var(--header-height) 55vh 80px 1fr;
@@ -8935,6 +8938,7 @@ import { FilterEngine }        from '../core/filter/FilterEngine'
 import IFCUploadZone           from '../features/viewer/IFCUploadZone'
 import SelectionLabel          from './SelectionLabel'
 import { useAllAssignments, useGlobalIdLayerMap } from '../hooks/useAssignments'
+import { useActivities, useGlobalIdActivityMap }  from '../hooks/useActivities'
 
 export default function IFCViewer() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -8968,9 +8972,16 @@ export default function IFCViewer() {
 
   const activeFilterIds    = useLayerStore(s => s.activeFilterIds)
 
-  // ── Phase 3: Bootstrap DB data ───────────────────────────
+  // ── Phase 3: Bootstrap DB data — layers ──────────────────
+  // React Query deduplicates: subscribing here doesn't fire extra requests.
   useAllAssignments()
   useGlobalIdLayerMap()
+
+  // ── Phase 4: Bootstrap DB data — activities ──────────────
+  // useActivities fetches all activities and syncs to activity store.
+  // useGlobalIdActivityMap patches IFCObject.activityIds for FilterEngine.
+  useActivities()
+  useGlobalIdActivityMap()
 
   // ── Init ViewerEngine once ───────────────────────────────
   useEffect(() => {
@@ -10006,25 +10017,57 @@ export default function LayerPanel() {
 FILE: src\components\Layout.tsx
 ====================================================================================================
 
-import { useState }              from 'react'
+/**
+ * Layout.tsx — Phase 6 Workspace: Viewer-Centric Layout
+ *
+ * Architecture:
+ *   ┌─────────────────────────────────────────────────────┐
+ *   │  Top Toolbar (header)                               │
+ *   ├──────┬──────────────────────────────────────────────┤
+ *   │      │                                              │
+ *   │ Nav  │  Slide-out Panel (optional)  │  IFC Viewer  │
+ *   │ Rail │  (only one open at a time)   │  (primary)   │
+ *   │      │                              │              │
+ *   ├──────┴──────────────────────────────────────────────┤
+ *   │  Gantt Dock — hidden by default, opens via NavRail  │
+ *   │  (contains: 4D Timeline Slider + Gantt chart)       │
+ *   └─────────────────────────────────────────────────────┘
+ *
+ * Phase 6 continuation changes vs initial Phase 6:
+ * - `<TimelineSlider>` has been removed from Layout. It now lives inside
+ *   `<GanttDock>` so it hides and shows together with the Gantt chart as
+ *   a single unified bottom dock — matching the behaviour of every SlidePanel.
+ * - `<GanttDock>` starts collapsed (workspace.store default) and opens only
+ *   when the user clicks the 📊 icon in the NavRail.
+ * - The viewer occupies the full remaining space when the dock is closed.
+ * - No business logic has changed. All stores, hooks, and services are intact.
+ *
+ * @module Layout
+ */
+
+import React                     from 'react'
 import { ErrorBoundary }         from '../app/providers/ErrorBoundary'
 import IFCViewer                 from './IFCViewer'
-import GanttPanel                from './GanttPanel'
-import TimelineSlider            from './TimelineSlider'
 import IFCInspector              from './IFCInspector'
 import IFCObjectTree             from './IFCObjectTree'
 import ZonePanel                 from './zones/ZonePanel'
 import ExistingZonesPanel        from './zones/ExistingZonesPanel'
 import ZoneFilterBar             from './zones/ZoneFilterBar'
 import ActivityPanel             from './activities/ActivityPanel'
+import NavRail                   from './workspace/NavRail'
+import SlidePanel                from './workspace/SlidePanel'
+import GanttDock                 from './workspace/GanttDock'
+import { useWorkspaceStore }     from '../store/workspace.store'
 import { useViewerStore }        from '../store/viewer.store'
 import { useLayerStore }         from '../store/layer.store'
 import { useActivityStore }      from '../store/activity.store'
 import { IFCUploadService }      from '../services/ifc/IFCUploadService'
 
-type RightTab = 'inspector' | 'tree' | 'zones' | 'existing-zones' | 'activities'
-
 export default function Layout() {
+  // ── Workspace layout state ───────────────────────────────
+  const activePanel = useWorkspaceStore(s => s.activePanel)
+
+  // ── Viewer model state ───────────────────────────────────
   const ifcObjects     = useViewerStore(s => s.ifcObjects)
   const modelLoadState = useViewerStore(s => s.modelLoadState)
   const modelFileName  = useViewerStore(s => s.modelFileName)
@@ -10032,10 +10075,10 @@ export default function Layout() {
   const resetModel     = useViewerStore(s => s.resetModel)
 
   // ── Camera view state ────────────────────────────────────
-  const renderMode          = useViewerStore(s => s.renderMode)
-  const wireframeActive     = useViewerStore(s => s.wireframeActive)
-  const setRenderMode       = useViewerStore(s => s.setRenderMode)
-  const setWireframeActive  = useViewerStore(s => s.setWireframeActive)
+  const renderMode         = useViewerStore(s => s.renderMode)
+  const wireframeActive    = useViewerStore(s => s.wireframeActive)
+  const setRenderMode      = useViewerStore(s => s.setRenderMode)
+  const setWireframeActive = useViewerStore(s => s.setWireframeActive)
 
   // Camera action callbacks — registered by IFCViewer once the engine is ready
   const setCameraPerspective = useViewerStore(s => s.setCameraPerspective)
@@ -10043,10 +10086,9 @@ export default function Layout() {
   const setCameraFront       = useViewerStore(s => s.setCameraFront)
   const setWireframe         = useViewerStore(s => s.setWireframe)
 
+  // ── Badge counts ─────────────────────────────────────────
   const activeFilterIds = useLayerStore(s => s.activeFilterIds)
   const activityCount   = useActivityStore(s => s.activities.length)
-
-  const [rightTab, setRightTab] = useState<RightTab>('inspector')
 
   // ── Camera button handlers ────────────────────────────────
 
@@ -10065,38 +10107,23 @@ export default function Layout() {
     setCameraFront?.()
   }
 
-  /**
-   * Wireframe is a rendering toggle independent of the active camera view.
-   * It can be combined with any view (Perspective, Top, Front).
-   *
-   * When enabled: renderMode shows 'wireframe' to keep the button active.
-   * When disabled: renderMode reverts to the last non-wireframe view so
-   * the correct view button re-activates.
-   */
   const handleWireframe = () => {
     const next = !wireframeActive
-
-    // Track the last camera view so we can restore it when wireframe is off
     if (next) {
-      // Activating wireframe — remember current non-wireframe mode via renderMode
       setRenderMode('wireframe')
     } else {
-      // Deactivating wireframe — restore previous camera view mode.
-      // We default to 'perspective' since we can't store the pre-wireframe
-      // mode without a separate state field. The button visual updates
-      // correctly: none of the view buttons will show as active while
-      // wireframe is on, and Perspective re-activates when it's off.
       setRenderMode('perspective')
     }
-
     setWireframeActive(next)
     setWireframe?.(next)
   }
 
   return (
-    <div className="bim-layout">
+    <div className="bim-layout-v6">
 
-      {/* ── HEADER ── */}
+      {/* ══════════════════════════════════════════════════════
+          HEADER TOOLBAR
+      ══════════════════════════════════════════════════════ */}
       <header className="bim-header">
         <div className="bim-header__logo">
           <div className="bim-header__logo-icon">4D</div>
@@ -10140,190 +10167,140 @@ export default function Layout() {
             </button>
           )}
           <button className="header-btn">📤 Export Report</button>
-          <button className="header-btn">⚙ Settings</button>
         </div>
       </header>
 
-      {/* ── 3D VIEWER ── */}
-      <div className="panel" style={{ borderLeft: 'none', borderRight: 'none' }}>
-        <div className="panel-header">
-          <span className="panel-header__label">3D Model Viewer</span>
-          <div className="panel-header__actions">
-            {/*
-              Camera view buttons: Perspective / Top / Front are mutually
-              exclusive view modes. The active class tracks renderMode.
+      {/* ══════════════════════════════════════════════════════
+          WORKSPACE BODY  (nav rail + slide panels + viewer)
+          ──────────────────────────────────────────────────
+          The viewer-workspace flex child expands to fill all
+          available width when no SlidePanel is open, and
+          contracts smoothly when one opens. The GanttDock
+          below shrinks this entire row vertically when open.
+      ══════════════════════════════════════════════════════ */}
+      <div className="workspace-body">
 
-              Wireframe is an independent toggle layered on top of the
-              current view. Its active state is tracked by wireframeActive
-              rather than renderMode so enabling wireframe does not clear
-              the active view button.
+        {/* ── Left navigation rail ── */}
+        <NavRail />
 
-              Buttons are visually disabled (pointer-events off, reduced
-              opacity) when the engine is not yet ready (callbacks are null).
-            */}
-            <button
-              className={`panel-action-btn${renderMode === 'perspective' ? ' active' : ''}`}
-              onClick={handlePerspective}
-              disabled={setCameraPerspective === null}
-              title="Perspective view"
-            >
-              Perspective
-            </button>
-            <button
-              className={`panel-action-btn${renderMode === 'top' ? ' active' : ''}`}
-              onClick={handleTop}
-              disabled={setCameraTop === null}
-              title="Top view (plan)"
-            >
-              Top
-            </button>
-            <button
-              className={`panel-action-btn${renderMode === 'front' ? ' active' : ''}`}
-              onClick={handleFront}
-              disabled={setCameraFront === null}
-              title="Front view (elevation)"
-            >
-              Front
-            </button>
-            <button
-              className={`panel-action-btn${wireframeActive ? ' active' : ''}`}
-              onClick={handleWireframe}
-              disabled={setWireframe === null}
-              title={wireframeActive ? 'Disable wireframe' : 'Enable wireframe'}
-            >
-              Wireframe
-            </button>
+        {/* ── Slide-out panels — always mounted, shown/hidden via CSS ──────
+            All five panels are kept in the DOM at all times so React Query
+            caches, in-progress form state, and Zustand subscriptions survive
+            panel close/reopen without any data loss or re-fetch.
+        ── */}
+
+        <SlidePanel isOpen={activePanel === 'ifc'} title="IFC Model">
+          <ErrorBoundary context="IFC Object Tree">
+            <IFCObjectTree />
+          </ErrorBoundary>
+        </SlidePanel>
+
+        <SlidePanel isOpen={activePanel === 'layers'} title="Information Layers">
+          <ErrorBoundary context="Zones Panel">
+            <ZonePanel />
+          </ErrorBoundary>
+          <ErrorBoundary context="Existing Zones Panel">
+            <ExistingZonesPanel />
+          </ErrorBoundary>
+        </SlidePanel>
+
+        <SlidePanel isOpen={activePanel === 'activities'} title="Activities">
+          <ErrorBoundary context="Activities Panel">
+            <ActivityPanel />
+          </ErrorBoundary>
+        </SlidePanel>
+
+        <SlidePanel isOpen={activePanel === 'inspector'} title="Inspector">
+          <ErrorBoundary context="IFC Inspector">
+            <IFCInspector />
+          </ErrorBoundary>
+        </SlidePanel>
+
+        <SlidePanel isOpen={activePanel === 'settings'} title="Settings">
+          <div className="settings-placeholder">
+            <p className="settings-placeholder__text">Settings panel coming soon.</p>
           </div>
-        </div>
-        <div className="panel-body" style={{ flexDirection: 'column' }}>
-          <ErrorBoundary context="3D Viewer">
-            <IFCViewer />
-          </ErrorBoundary>
-          <ErrorBoundary context="Zone Filter Bar">
-            <ZoneFilterBar />
-          </ErrorBoundary>
-        </div>
-      </div>
+        </SlidePanel>
 
-      {/* ── TIMELINE ── */}
-      <ErrorBoundary context="Timeline Slider">
-        <TimelineSlider />
-      </ErrorBoundary>
+        {/* ── Primary 3D viewer workspace ── */}
+        <div className="viewer-workspace">
 
-      {/* ── BOTTOM ROW ── */}
-      <div className="bim-bottom">
-
-        {/* Left: Gantt */}
-        <div className="panel" style={{ borderLeft: 'none' }}>
-          <div className="panel-header">
-            <span className="panel-header__label">Gantt Schedule</span>
-            <div className="panel-header__actions">
-              <button className="panel-action-btn">Filter</button>
-              <button className="panel-action-btn">Group</button>
+          {/* Camera controls toolbar — floats above the canvas */}
+          <div className="viewer-toolbar">
+            <div className="viewer-toolbar__views">
+              <button
+                className={`panel-action-btn${renderMode === 'perspective' ? ' active' : ''}`}
+                onClick={handlePerspective}
+                disabled={setCameraPerspective === null}
+                title="Perspective view"
+              >
+                Perspective
+              </button>
+              <button
+                className={`panel-action-btn${renderMode === 'top' ? ' active' : ''}`}
+                onClick={handleTop}
+                disabled={setCameraTop === null}
+                title="Top view (plan)"
+              >
+                Top
+              </button>
+              <button
+                className={`panel-action-btn${renderMode === 'front' ? ' active' : ''}`}
+                onClick={handleFront}
+                disabled={setCameraFront === null}
+                title="Front view (elevation)"
+              >
+                Front
+              </button>
+              <button
+                className={`panel-action-btn${wireframeActive ? ' active' : ''}`}
+                onClick={handleWireframe}
+                disabled={setWireframe === null}
+                title={wireframeActive ? 'Disable wireframe' : 'Enable wireframe'}
+              >
+                Wireframe
+              </button>
             </div>
+
+            {/* Active layer filter badge — always visible in the viewer toolbar
+                so the user can see filter state regardless of which panel is open */}
+            {activeFilterIds.length > 0 && (
+              <div className="viewer-toolbar__filter-badge">
+                <span className="bim-badge bim-badge--zone-filter">
+                  📐 {activeFilterIds.length} layer{activeFilterIds.length !== 1 ? 's' : ''} active
+                </span>
+              </div>
+            )}
           </div>
-          <div className="panel-body">
-            <ErrorBoundary context="Gantt Panel">
-              <GanttPanel />
+
+          {/* 3D canvas — fills all remaining vertical space in viewer-workspace */}
+          <div className="viewer-canvas-host">
+            <ErrorBoundary context="3D Viewer">
+              <IFCViewer />
+            </ErrorBoundary>
+            <ErrorBoundary context="Zone Filter Bar">
+              <ZoneFilterBar />
             </ErrorBoundary>
           </div>
+
         </div>
-
-        {/* Right: Inspector | Object Tree | Zones | Existing Zones | Activities */}
-        <div className="panel" style={{ borderRight: 'none' }}>
-          <div className="panel-header">
-            <div className="panel-tabs">
-
-              <button
-                className={`panel-tab${rightTab === 'inspector' ? ' panel-tab--active' : ''}`}
-                onClick={() => setRightTab('inspector')}
-              >
-                Inspector
-              </button>
-
-              <button
-                className={`panel-tab${rightTab === 'tree' ? ' panel-tab--active' : ''}`}
-                onClick={() => setRightTab('tree')}
-              >
-                Object Tree
-              </button>
-
-              <button
-                className={`panel-tab${rightTab === 'zones' ? ' panel-tab--active' : ''}`}
-                onClick={() => setRightTab('zones')}
-              >
-                Zones
-              </button>
-
-              {/*
-                Existing Zones tab — badge shows active filter count so users
-                know filters are on even when viewing a different tab.
-              */}
-              <button
-                className={`panel-tab${rightTab === 'existing-zones' ? ' panel-tab--active' : ''}`}
-                onClick={() => setRightTab('existing-zones')}
-              >
-                Existing Zones
-                {activeFilterIds.length > 0 && (
-                  <span className="panel-tab__badge">{activeFilterIds.length}</span>
-                )}
-              </button>
-
-              {/*
-                Activities tab — Phase 4 addition.
-                Badge shows total activity count so users always know how
-                many activities are in the schedule.
-              */}
-              <button
-                className={`panel-tab${rightTab === 'activities' ? ' panel-tab--active' : ''}`}
-                onClick={() => setRightTab('activities')}
-              >
-                Activities
-                {activityCount > 0 && (
-                  <span className="panel-tab__badge">{activityCount}</span>
-                )}
-              </button>
-
-            </div>
-            <div className="panel-header__actions">
-              {rightTab === 'inspector' && (
-                <button className="panel-action-btn">Properties</button>
-              )}
-            </div>
-          </div>
-
-          <div className="panel-body" style={{ overflow: 'hidden' }}>
-
-            {rightTab === 'inspector' ? (
-              <ErrorBoundary context="IFC Inspector">
-                <IFCInspector />
-              </ErrorBoundary>
-
-            ) : rightTab === 'tree' ? (
-              <ErrorBoundary context="IFC Object Tree">
-                <IFCObjectTree />
-              </ErrorBoundary>
-
-            ) : rightTab === 'zones' ? (
-              <ErrorBoundary context="Zones Panel">
-                <ZonePanel />
-              </ErrorBoundary>
-
-            ) : rightTab === 'existing-zones' ? (
-              <ErrorBoundary context="Existing Zones Panel">
-                <ExistingZonesPanel />
-              </ErrorBoundary>
-
-            ) : (
-              <ErrorBoundary context="Activities Panel">
-                <ActivityPanel />
-              </ErrorBoundary>
-            )}
-
-          </div>
-        </div>
-
       </div>
+
+      {/* ══════════════════════════════════════════════════════
+          GANTT DOCK
+          ──────────────────────────────────────────────────
+          Starts collapsed (height: 0) so the viewer fills the
+          full screen on load. The 📊 NavRail icon calls
+          toggleGantt() to open/close it — identical to how
+          every SlidePanel responds to its NavRail icon.
+
+          The dock contains both the 4D Timeline Slider and the
+          Gantt chart as a unified unit. Neither component is
+          ever unmounted — React Query caches and simulation
+          state are preserved across open/close cycles.
+      ══════════════════════════════════════════════════════ */}
+      <GanttDock />
+
     </div>
   )
 }
@@ -11135,6 +11112,384 @@ const messageStyle: CSSProperties = {
   fontFamily: "'Segoe UI', system-ui, sans-serif",
   textAlign:  'center',
 }
+
+
+====================================================================================================
+FILE: src\components\workspace\GanttDock.tsx
+====================================================================================================
+
+/**
+ * GanttDock.tsx — Resizable, collapsible bottom dock for the Gantt timeline.
+ *
+ * Phase 6 continuation changes:
+ * - The `TimelineSlider` (4D playback controls) is now rendered INSIDE the
+ *   dock, directly above the Gantt chart, so both hide and show together as
+ *   one coherent unit when the user opens/closes the dock from the NavRail.
+ *   Previously, `TimelineSlider` lived as a permanent sibling in `Layout.tsx`
+ *   between the viewer and the dock — that was the root cause of the "always
+ *   visible" inconsistency.
+ *
+ * - The dock header's collapse button now uses the same chevron convention
+ *   as before, but it doubles as the only close mechanism alongside the
+ *   NavRail icon, matching the `SlidePanel` pattern exactly.
+ *
+ * Behaviour:
+ * - Hidden by default (workspace.store `ganttCollapsed` starts as `true`).
+ * - Opens when the user clicks the 📊 NavRail icon (calls `toggleGantt()`).
+ * - Closes when: the NavRail icon is clicked again, OR the ▼ header button.
+ * - Drag the top resize handle to adjust dock height (120–520 px).
+ * - Resize is done via direct DOM mutation during drag (no React re-renders).
+ * - Height is committed to workspace.store on pointerup.
+ * - `GanttPanel` and `TimelineSlider` are NEVER unmounted — preserves React
+ *   Query cache, Frappe/D3 state, and simulation store state across open/close.
+ * - `aria-hidden` toggles so screen readers skip hidden content.
+ *
+ * Layout when open:
+ *   ┌──────────────────────────────────────────────┐
+ *   │ [resize handle]                              │
+ *   │ [header] Gantt Schedule  [Filter][Group][▼]  │
+ *   │ ─────────────────────────────────────────── │
+ *   │ 4D Timeline Control  [⏮][▶]  ──slider──    │
+ *   │ ─────────────────────────────────────────── │
+ *   │ GanttPanel                                   │
+ *   └──────────────────────────────────────────────┘
+ *
+ * @module GanttDock
+ */
+
+import React, { useRef, useCallback } from 'react'
+import { ErrorBoundary }   from '../../app/providers/ErrorBoundary'
+import GanttPanel          from '../GanttPanel'
+import TimelineSlider      from '../TimelineSlider'
+import { useWorkspaceStore } from '../../store/workspace.store'
+
+const DOCK_HEADER_HEIGHT = 36   // px — visible even when collapsed
+
+const GanttDock: React.FC = () => {
+  const ganttCollapsed = useWorkspaceStore(s => s.ganttCollapsed)
+  const ganttHeight    = useWorkspaceStore(s => s.ganttHeight)
+  const toggleGantt    = useWorkspaceStore(s => s.toggleGantt)
+  const setGanttHeight = useWorkspaceStore(s => s.setGanttHeight)
+
+  const dockRef     = useRef<HTMLDivElement>(null)
+  const dragStartY  = useRef<number>(0)
+  const dragStartH  = useRef<number>(0)
+
+  // ── Drag-resize ─────────────────────────────────────────────────────────────
+  //
+  // Live DOM mutation during drag avoids scheduling React re-renders at 60 fps.
+  // The final value is committed to the store only on pointerup, which triggers
+  // exactly one re-render to sync CSS height from the store.
+
+  const onPointerMove = useCallback((e: PointerEvent) => {
+    const delta   = dragStartY.current - e.clientY  // drag up = taller
+    const newH    = dragStartH.current + delta
+    if (dockRef.current) {
+      const clamped = Math.max(120, Math.min(520, newH))
+      dockRef.current.style.height = `${clamped}px`
+    }
+  }, [])
+
+  const onPointerUp = useCallback((e: PointerEvent) => {
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup',   onPointerUp)
+    const delta = dragStartY.current - e.clientY
+    const newH  = dragStartH.current + delta
+    setGanttHeight(newH)  // commit to store → one React re-render
+  }, [onPointerMove, setGanttHeight])
+
+  const onHandlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    dragStartY.current = e.clientY
+    dragStartH.current = dockRef.current?.offsetHeight ?? ganttHeight
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup',   onPointerUp)
+  }, [ganttHeight, onPointerMove, onPointerUp])
+
+  // ── Computed style ───────────────────────────────────────────────────────────
+  //
+  // When collapsed: height collapses to 0 (not just the header) so the viewer
+  // fully reclaims the space. The dock's CSS `overflow: hidden` hides everything.
+  // When open: height is the user's last-set value from the store.
+
+  const dockStyle: React.CSSProperties = {
+    height: ganttCollapsed ? 0 : ganttHeight,
+  }
+
+  return (
+    <div
+      ref={dockRef}
+      className={`gantt-dock${ganttCollapsed ? ' gantt-dock--collapsed' : ''}`}
+      style={dockStyle}
+      aria-hidden={ganttCollapsed}
+    >
+      {/* ── Resize handle — only rendered when expanded ── */}
+      {!ganttCollapsed && (
+        <div
+          className="gantt-dock__resize-handle"
+          onPointerDown={onHandlePointerDown}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize Gantt dock"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp')   setGanttHeight(ganttHeight + 20)
+            if (e.key === 'ArrowDown') setGanttHeight(ganttHeight - 20)
+          }}
+        />
+      )}
+
+      {/* ── Dock header bar — title + Filter / Group / close ── */}
+      <div className="gantt-dock__header">
+        <span className="gantt-dock__title">Gantt Schedule</span>
+        <div className="gantt-dock__actions">
+          <button className="panel-action-btn">Filter</button>
+          <button className="panel-action-btn">Group</button>
+          {/* Close button mirrors SlidePanel's ✕ button in behaviour */}
+          <button
+            className="gantt-dock__collapse-btn"
+            onClick={toggleGantt}
+            title="Close Gantt dock"
+            aria-label="Close Gantt dock"
+            aria-expanded={!ganttCollapsed}
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* ── Dock body — TimelineSlider + GanttPanel, always mounted ── */}
+      <div className="gantt-dock__body">
+
+        {/* 4D Timeline controls live inside the dock so they hide with it */}
+        <ErrorBoundary context="Timeline Slider">
+          <TimelineSlider />
+        </ErrorBoundary>
+
+        {/* Gantt chart fills remaining dock height */}
+        <div className="gantt-dock__chart">
+          <ErrorBoundary context="Gantt Panel">
+            <GanttPanel />
+          </ErrorBoundary>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+export default GanttDock
+
+
+====================================================================================================
+FILE: src\components\workspace\NavRail.tsx
+====================================================================================================
+
+/**
+ * NavRail.tsx — Left vertical icon navigation rail.
+ *
+ * Renders a compact column of icons corresponding to side panels.
+ * Clicking an icon opens (or toggles closed) the matching slide-out panel.
+ * The active icon is highlighted.
+ *
+ * Phase 6 continuation change:
+ * - Added a 📊 "Gantt / 4D Timeline" icon that calls `toggleGantt()`.
+ *   It mirrors the exact highlight behaviour of every other rail icon:
+ *   active (highlighted) when the dock is open, inactive when collapsed.
+ * - Gantt icon carries an activity badge so the user sees schedule size
+ *   without opening the dock.
+ *
+ * Design decisions:
+ * - Icons only — no text labels — keeps the rail narrow (48 px).
+ * - Tooltip on hover (native title attribute; lightweight, no extra library).
+ * - Badge counts on Layers, Activities, and Gantt so users see live counts.
+ * - Separator divides navigation items from the Settings item.
+ * - Zero business logic here; all state goes through workspace.store.
+ *
+ * @module NavRail
+ */
+
+import React from 'react'
+import { useWorkspaceStore, type SidePanel } from '../../store/workspace.store'
+import { useLayerStore }    from '../../store/layer.store'
+import { useActivityStore } from '../../store/activity.store'
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+/** A normal side-panel nav item — calls openPanel(id). */
+interface PanelNavItem {
+  kind:   'panel'
+  id:     SidePanel
+  icon:   string
+  label:  string
+  badge?: number
+}
+
+/** The Gantt dock toggle — calls toggleGantt() instead of openPanel(). */
+interface GanttNavItem {
+  kind:  'gantt'
+  icon:  string
+  label: string
+  badge?: number
+}
+
+type NavItem = PanelNavItem | GanttNavItem
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+const NavRail: React.FC = () => {
+  const activePanel    = useWorkspaceStore(s => s.activePanel)
+  const ganttCollapsed = useWorkspaceStore(s => s.ganttCollapsed)
+  const openPanel      = useWorkspaceStore(s => s.openPanel)
+  const toggleGantt    = useWorkspaceStore(s => s.toggleGantt)
+
+  const layerCount    = useLayerStore(s => s.layers.length)
+  const activityCount = useActivityStore(s => s.activities.length)
+
+  // ── Navigation items ──────────────────────────────────────────────────────
+
+  const topItems: NavItem[] = [
+    { kind: 'panel', id: 'ifc',        icon: '📂', label: 'IFC Model' },
+    { kind: 'panel', id: 'layers',     icon: '🏷',  label: 'Layers',              badge: layerCount || undefined },
+    { kind: 'panel', id: 'activities', icon: '📅', label: 'Activities',            badge: activityCount || undefined },
+    { kind: 'panel', id: 'inspector',  icon: '🔍', label: 'Inspector' },
+    {
+      kind:  'gantt',
+      icon:  '📊',
+      label: 'Gantt / 4D Timeline',
+      badge: activityCount || undefined,
+    },
+  ]
+
+  const bottomItems: NavItem[] = [
+    { kind: 'panel', id: 'settings', icon: '⚙', label: 'Settings' },
+  ]
+
+  // ── Render helpers ────────────────────────────────────────────────────────
+
+  const renderItem = (item: NavItem, index: number) => {
+    // Determine active state:
+    //   - panel items: active when that panel is open in the slide-out area
+    //   - gantt item: active when the dock is NOT collapsed
+    const isActive =
+      item.kind === 'panel'
+        ? activePanel === item.id
+        : !ganttCollapsed
+
+    const handleClick = () => {
+      if (item.kind === 'panel') {
+        openPanel(item.id)
+      } else {
+        toggleGantt()
+      }
+    }
+
+    const badge = item.badge
+
+    return (
+      <button
+        key={item.kind === 'panel' ? item.id : 'gantt'}
+        className={`nav-rail__btn${isActive ? ' nav-rail__btn--active' : ''}`}
+        onClick={handleClick}
+        title={item.label}
+        aria-label={item.label}
+        aria-pressed={isActive}
+      >
+        <span className="nav-rail__icon" aria-hidden="true">{item.icon}</span>
+        {badge !== undefined && badge > 0 && (
+          <span className="nav-rail__badge" aria-label={`${badge} items`}>
+            {badge > 99 ? '99+' : badge}
+          </span>
+        )}
+      </button>
+    )
+  }
+
+  return (
+    <nav className="nav-rail" aria-label="Tool panels">
+      <div className="nav-rail__top">
+        {topItems.map((item, i) => renderItem(item, i))}
+      </div>
+      <div className="nav-rail__bottom">
+        <div className="nav-rail__separator" aria-hidden="true" />
+        {bottomItems.map((item, i) => renderItem(item, i))}
+      </div>
+    </nav>
+  )
+}
+
+export default NavRail
+
+
+====================================================================================================
+FILE: src\components\workspace\SlidePanel.tsx
+====================================================================================================
+
+/**
+ * SlidePanel.tsx — Animated slide-out side panel container.
+ *
+ * Wraps any panel content with:
+ * - A slide-in / slide-out CSS transition driven by the `isOpen` prop.
+ * - A panel header bar with label and close button.
+ * - The panel content area (scrollable).
+ *
+ * Performance design:
+ * - The panel is NEVER unmounted while the app is running (avoids destroying
+ *   component state, unsaved form fields, and expensive sub-tree mounts).
+ * - Hidden state is achieved via CSS transform + visibility, not React
+ *   conditional rendering. React.memo prevents re-renders of children when
+ *   the panel is closed.
+ * - `aria-hidden` is toggled so screen readers skip the hidden content.
+ *
+ * @module SlidePanel
+ */
+
+import React from 'react'
+import { useWorkspaceStore } from '../../store/workspace.store'
+
+interface SlidePanelProps {
+  /** Whether this panel is currently visible */
+  isOpen:   boolean
+  /** Human-readable panel title shown in the header bar */
+  title:    string
+  /** Panel content — kept mounted at all times */
+  children: React.ReactNode
+}
+
+const SlidePanel: React.FC<SlidePanelProps> = ({ isOpen, title, children }) => {
+  const panelWidth = useWorkspaceStore(s => s.panelWidth)
+  const closePanel = useWorkspaceStore(s => s.closePanel)
+
+  return (
+    <div
+      className={`slide-panel${isOpen ? ' slide-panel--open' : ''}`}
+      style={{ width: panelWidth }}
+      aria-hidden={!isOpen}
+      role="complementary"
+      aria-label={title}
+    >
+      {/* Panel header */}
+      <div className="slide-panel__header">
+        <span className="slide-panel__title">{title}</span>
+        <button
+          className="slide-panel__close"
+          onClick={closePanel}
+          aria-label={`Close ${title} panel`}
+          title="Close panel"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Panel body — scrollable */}
+      <div className="slide-panel__body">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+export default React.memo(SlidePanel)
 
 
 ====================================================================================================
@@ -15862,6 +16217,148 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
 
 ====================================================================================================
+FILE: src\store\workspace.store.ts
+====================================================================================================
+
+/**
+ * workspace.store.ts — Zustand store for Phase 6 workspace layout state.
+ *
+ * Manages:
+ * - Which side panel is currently open (single-panel policy)
+ * - Gantt dock: collapsed state + remembered height
+ * - Panel widths (future: per-panel drag-resize)
+ *
+ * Phase 6 continuation change:
+ * - `ganttCollapsed` now defaults to `true` so the Gantt dock starts hidden,
+ *   exactly matching the hide-by-default behaviour of every SlidePanel.
+ *   The NavRail Gantt icon calls `toggleGantt()` to open/close it on demand.
+ *
+ * Design principles:
+ * - Single active side panel at a time (clicking a second panel closes the first).
+ * - Gantt dock height survives collapse/expand cycles via lastGanttHeight.
+ * - This store is UI-only; no business logic or domain data lives here.
+ * - Keeps existing ui.store intact — this store extends, does not replace it.
+ *
+ * @module workspace.store
+ */
+
+import { create } from 'zustand'
+
+// ── Panel identifiers ──────────────────────────────────────────────────────────
+
+/**
+ * All panels reachable from the left navigation rail.
+ * 'none' means no slide-out panel is open (viewer fills the space).
+ */
+export type SidePanel =
+  | 'ifc'
+  | 'layers'
+  | 'activities'
+  | 'inspector'
+  | 'settings'
+  | 'none'
+
+// ── State shape ───────────────────────────────────────────────────────────────
+
+interface WorkspaceState {
+  /** The currently visible slide-out panel. 'none' = viewer-only mode. */
+  activePanel: SidePanel
+
+  /** Width of the open side panel in pixels. User-resizable (future). */
+  panelWidth: number
+
+  /**
+   * Whether the bottom Gantt / 4D Timeline dock is collapsed.
+   *
+   * Defaults to `true` — the Gantt starts hidden, exactly like every other
+   * panel, and opens only when the user clicks its NavRail icon.
+   */
+  ganttCollapsed: boolean
+
+  /** Height of the Gantt dock in pixels when expanded. Persists across collapse. */
+  ganttHeight: number
+
+  /** The last non-zero Gantt height — used to restore after collapse. */
+  lastGanttHeight: number
+
+  // ── Actions ──────────────────────────────────────────────────────────
+
+  /**
+   * Open a side panel. If the panel is already open, close it (toggle).
+   * Implements the single-active-panel policy.
+   */
+  openPanel: (panel: SidePanel) => void
+
+  /** Force-close the active side panel. */
+  closePanel: () => void
+
+  /**
+   * Toggle the Gantt / 4D Timeline dock open or closed.
+   * Remembers dock height across collapse/expand cycles.
+   * Called by the NavRail Gantt icon and by the dock's own collapse button.
+   */
+  toggleGantt: () => void
+
+  /** Set Gantt dock height (called during drag-resize). */
+  setGanttHeight: (height: number) => void
+
+  /** Set panel width (called during drag-resize). */
+  setPanelWidth: (width: number) => void
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const DEFAULT_PANEL_WIDTH  = 320
+const DEFAULT_GANTT_HEIGHT = 260
+const MIN_GANTT_HEIGHT     = 120
+const MAX_GANTT_HEIGHT     = 520
+
+// ── Store ─────────────────────────────────────────────────────────────────────
+
+export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
+  activePanel:     'none',
+  panelWidth:      DEFAULT_PANEL_WIDTH,
+
+  // ── Gantt starts COLLAPSED (hidden by default, same as all other panels) ──
+  ganttCollapsed:  true,
+  ganttHeight:     DEFAULT_GANTT_HEIGHT,
+  lastGanttHeight: DEFAULT_GANTT_HEIGHT,
+
+  openPanel: (panel) => {
+    const { activePanel } = get()
+    // Toggle: clicking the already-open panel closes it
+    set({ activePanel: activePanel === panel ? 'none' : panel })
+  },
+
+  closePanel: () => set({ activePanel: 'none' }),
+
+  toggleGantt: () => {
+    const { ganttCollapsed, ganttHeight } = get()
+    if (ganttCollapsed) {
+      // Expanding — restore last remembered height
+      set({ ganttCollapsed: false })
+    } else {
+      // Collapsing — remember current height before hiding
+      set({
+        ganttCollapsed:  true,
+        lastGanttHeight: ganttHeight,
+      })
+    }
+  },
+
+  setGanttHeight: (height) => {
+    const clamped = Math.max(MIN_GANTT_HEIGHT, Math.min(MAX_GANTT_HEIGHT, height))
+    set({ ganttHeight: clamped, lastGanttHeight: clamped })
+  },
+
+  setPanelWidth: (width) => {
+    const clamped = Math.max(260, Math.min(520, width))
+    set({ panelWidth: clamped })
+  },
+}))
+
+
+====================================================================================================
 FILE: src\styles\activities.css
 ====================================================================================================
 
@@ -17307,6 +17804,495 @@ FILE: src\styles\upload.css
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+
+====================================================================================================
+FILE: src\styles\workspace.css
+====================================================================================================
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   workspace.css — Phase 6 Viewer-Centric Workspace Layout
+   ═══════════════════════════════════════════════════════════════════════════
+
+   Design tokens inherit from the existing :root variables in App.css.
+   New tokens introduced here follow the same naming convention.
+
+   Layout hierarchy:
+     .bim-layout-v6              — Full-screen flex column (replaces .bim-layout)
+       .bim-header               — Top toolbar (reused, unchanged)
+       .workspace-body           — flex row: nav-rail + panels + viewer
+         .nav-rail               — 48 px left icon column
+         .slide-panel            — Zero-width when closed; animates open
+         .viewer-workspace       — Fills remaining horizontal space
+           .viewer-toolbar       — Camera-control row above canvas
+           .viewer-canvas-host   — IFC canvas fills this element
+       .gantt-dock               — Bottom dock; height:0 when collapsed
+         .gantt-dock__header     — Always present when dock is rendered
+         .gantt-dock__body       — Scrollable; contains TimelineSlider + chart
+           .timeline-panel       — 4D playback controls (no top border here)
+           .gantt-dock__chart    — Gantt chart, fills remaining dock height
+
+   Phase 6 continuation changes vs initial phase6/workspace.css:
+   - .gantt-dock--collapsed rule: height collapses to 0 (not header height)
+     so the viewer fully reclaims the vertical space.
+   - Added .gantt-dock__chart for the flex child that holds GanttPanel.
+   - .gantt-dock .timeline-panel overrides top/bottom border so the slider
+     integrates cleanly inside the dock without a double-border.
+   - Dock header close button now renders ✕ (matching SlidePanel) — no new CSS.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── New tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --nav-rail-width:       48px;
+  --panel-transition:     0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  --gantt-header-height:  36px;
+  --toolbar-height:       36px;
+  --slide-shadow:         4px 0 24px rgba(0, 0, 0, 0.45);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ROOT LAYOUT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bim-layout-v6 {
+  display:        flex;
+  flex-direction: column;
+  height:         100vh;
+  width:          100vw;
+  overflow:       hidden;
+  background:     var(--bg-primary);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WORKSPACE BODY
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.workspace-body {
+  display:    flex;
+  flex:       1;
+  overflow:   hidden;
+  position:   relative;
+  min-height: 0;  /* allows flex child to shrink below content height */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LEFT NAVIGATION RAIL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.nav-rail {
+  width:            var(--nav-rail-width);
+  flex-shrink:      0;
+  background:       var(--bg-secondary);
+  border-right:     1px solid var(--border-color);
+  display:          flex;
+  flex-direction:   column;
+  justify-content:  space-between;
+  align-items:      center;
+  padding:          8px 0;
+  z-index:          20;
+  overflow:         hidden;
+}
+
+.nav-rail__top,
+.nav-rail__bottom {
+  display:          flex;
+  flex-direction:   column;
+  align-items:      center;
+  gap:              2px;
+  width:            100%;
+}
+
+.nav-rail__separator {
+  width:      28px;
+  height:     1px;
+  background: var(--border-color);
+  margin:     6px auto;
+}
+
+.nav-rail__btn {
+  position:         relative;
+  width:            38px;
+  height:           38px;
+  border-radius:    8px;
+  border:           1px solid transparent;
+  background:       transparent;
+  color:            var(--text-secondary);
+  cursor:           pointer;
+  display:          flex;
+  align-items:      center;
+  justify-content:  center;
+  font-size:        17px;
+  transition:       background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink:      0;
+}
+
+.nav-rail__btn:hover {
+  background:   var(--bg-panel);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+
+.nav-rail__btn:focus-visible {
+  outline:        2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.nav-rail__btn--active {
+  background:   rgba(47, 107, 255, 0.18);
+  border-color: var(--accent-blue);
+  color:        var(--accent-blue);
+}
+
+.nav-rail__icon {
+  line-height: 1;
+}
+
+/* Badge — small pill in top-right corner of icon button */
+.nav-rail__badge {
+  position:         absolute;
+  top:              3px;
+  right:            3px;
+  min-width:        14px;
+  height:           14px;
+  border-radius:    7px;
+  background:       var(--accent-blue);
+  color:            #fff;
+  font-size:        9px;
+  font-weight:      700;
+  display:          flex;
+  align-items:      center;
+  justify-content:  center;
+  padding:          0 3px;
+  pointer-events:   none;
+  letter-spacing:   0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SLIDE-OUT PANEL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.slide-panel {
+  flex-shrink:    0;
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+  background:     var(--bg-panel);
+  border-right:   1px solid var(--border-color);
+  box-shadow:     var(--slide-shadow);
+
+  /* Closed state */
+  width:          0 !important;
+  opacity:        0;
+  pointer-events: none;
+
+  transition:
+    width   var(--panel-transition),
+    opacity var(--panel-transition);
+
+  z-index: 15;
+}
+
+.slide-panel--open {
+  width:          var(--panel-width, 320px) !important;
+  opacity:        1;
+  pointer-events: auto;
+}
+
+.slide-panel__header {
+  background:      var(--bg-secondary);
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         0 12px;
+  height:          36px;
+  flex-shrink:     0;
+}
+
+.slide-panel__title {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color:          var(--text-secondary);
+  white-space:    nowrap;
+  overflow:       hidden;
+  text-overflow:  ellipsis;
+}
+
+.slide-panel__close {
+  background:      transparent;
+  border:          1px solid transparent;
+  border-radius:   4px;
+  color:           var(--text-secondary);
+  width:           22px;
+  height:          22px;
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  font-size:       11px;
+  cursor:          pointer;
+  flex-shrink:     0;
+  transition:      background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.slide-panel__close:hover {
+  background:   var(--bg-panel);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+
+.slide-panel__close:focus-visible {
+  outline:        2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.slide-panel__body {
+  flex:       1;
+  overflow:   auto;
+  min-height: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VIEWER WORKSPACE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.viewer-workspace {
+  flex:           1;
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+  min-width:      0;
+  position:       relative;
+}
+
+.viewer-toolbar {
+  background:      var(--bg-secondary);
+  border-bottom:   1px solid var(--border-color);
+  height:          var(--toolbar-height);
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         0 12px;
+  gap:             8px;
+  flex-shrink:     0;
+  z-index:         10;
+}
+
+.viewer-toolbar__views {
+  display:     flex;
+  align-items: center;
+  gap:         4px;
+}
+
+.viewer-toolbar__filter-badge {
+  display:     flex;
+  align-items: center;
+}
+
+.viewer-canvas-host {
+  flex:       1;
+  position:   relative;
+  overflow:   hidden;
+  background: #070B0F;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GANTT DOCK
+   ═══════════════════════════════════════════════════════════════════════════
+
+   The dock is a flex-shrink:0 child of .bim-layout-v6.
+   Its height is set inline by GanttDock.tsx from workspace.store.ganttHeight.
+
+   Collapsed state: height → 0 (fully hidden; border-top disappears too).
+   This means the viewer above reclaims 100% of the remaining vertical space —
+   identical to how a SlidePanel reclaims horizontal space when closed.
+
+   The CSS transition on `height` provides the smooth open/close animation that
+   matches the SlidePanel's `width` transition. Same easing, same duration.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gantt-dock {
+  flex-shrink:    0;
+  display:        flex;
+  flex-direction: column;
+  background:     var(--bg-primary);
+  border-top:     1px solid var(--border-color);
+  overflow:       hidden;
+  transition:     height var(--panel-transition);
+  position:       relative;
+  z-index:        10;
+}
+
+/* When collapsed, height reaches 0 via the inline style set in GanttDock.tsx.
+   The border-top also visually disappears because the element has no height.
+   We keep the rule below to suppress the body in the rare case where
+   height hasn't finished transitioning. */
+.gantt-dock--collapsed .gantt-dock__body {
+  pointer-events: none;
+  overflow:       hidden;
+}
+
+/* Resize handle — drag target sits at the very top of the dock */
+.gantt-dock__resize-handle {
+  position:   absolute;
+  top:        0;
+  left:       0;
+  right:      0;
+  height:     5px;
+  cursor:     ns-resize;
+  background: transparent;
+  z-index:    20;
+  transition: background 0.15s;
+}
+
+.gantt-dock__resize-handle:hover,
+.gantt-dock__resize-handle:focus-visible {
+  background: rgba(47, 107, 255, 0.3);
+  outline:    none;
+}
+
+.gantt-dock__header {
+  background:      var(--bg-secondary);
+  border-bottom:   1px solid var(--border-color);
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         0 16px;
+  height:          var(--gantt-header-height);
+  flex-shrink:     0;
+}
+
+.gantt-dock__title {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 1.5px;
+  color:          var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.gantt-dock__actions {
+  display:     flex;
+  align-items: center;
+  gap:         6px;
+}
+
+/* Close button — styled identically to .slide-panel__close for consistency */
+.gantt-dock__collapse-btn {
+  background:      transparent;
+  border:          1px solid transparent;
+  border-radius:   4px;
+  color:           var(--text-secondary);
+  width:           22px;
+  height:          22px;
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  font-size:       11px;
+  cursor:          pointer;
+  transition:      background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.gantt-dock__collapse-btn:hover {
+  background:   var(--bg-panel);
+  border-color: var(--border-color);
+  color:        var(--text-primary);
+}
+
+.gantt-dock__collapse-btn:focus-visible {
+  outline:        2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+/* Dock body — flex column containing TimelineSlider + GanttPanel */
+.gantt-dock__body {
+  flex:           1;
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+  min-height:     0;
+}
+
+/* GanttPanel host — fills all remaining height below the TimelineSlider */
+.gantt-dock__chart {
+  flex:       1;
+  overflow:   hidden;
+  position:   relative;
+  min-height: 0;
+}
+
+/* ── TimelineSlider inside the dock ──────────────────────────────────────
+   The original .timeline-panel class has a top border. Inside the dock
+   that would create a double-border against the dock header's bottom
+   border. We override it here with a higher-specificity rule.
+   The bottom border stays so the slider visually separates from the chart.
+   ─────────────────────────────────────────────────────────────────────── */
+.gantt-dock__body .timeline-panel {
+  border-top:    none;
+  flex-shrink:   0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SETTINGS PLACEHOLDER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.settings-placeholder {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  height:          100%;
+  padding:         24px;
+}
+
+.settings-placeholder__text {
+  color:      var(--text-secondary);
+  font-size:  13px;
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PANEL-TAB BADGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.panel-tab__badge {
+  display:         inline-flex;
+  align-items:     center;
+  justify-content: center;
+  min-width:       16px;
+  height:          16px;
+  border-radius:   8px;
+  background:      var(--accent-blue);
+  color:           #fff;
+  font-size:       9px;
+  font-weight:     700;
+  padding:         0 4px;
+  margin-left:     5px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE BREAKPOINTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1280px) {
+  .slide-panel--open {
+    max-width: 280px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .bim-header__center .bim-badge:not(.bim-badge--active) {
+    display: none;
+  }
+  .bim-header__subtitle {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .bim-header__right .header-btn:not(:first-child) {
+    display: none;
+  }
 }
 
 

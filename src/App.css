@@ -4,6 +4,8 @@
 @import './styles/activities.css';
 @import './styles/phase5-additions.css';
 @import './styles/workspace.css';
+@import './styles/workspace.css';
+@import './styles/timeline-activity-scope.css';
 
 :root {
   --bg-primary: #0D1117;

@@ -10,6 +10,20 @@
  * 4. **Engine actions** — Callback references into the live ViewerEngine instance.
  *    These are nulled only when the engine is disposed (component unmount).
  *
+ * Phase 6 selection UX change:
+ * - Added `isIsolated: boolean` and `setIsIsolated(boolean)`.
+ *
+ *   Previously, isolation state was local React state (`useState`) inside
+ *   `IFCInspector`. This made it invisible to every other component —
+ *   `SelectionLabel`, `IFCViewer`'s Escape handler, and the viewer toolbar
+ *   could not know whether the model was isolated or not.
+ *
+ *   Moving it to the store makes it a single observable truth:
+ *   - `IFCInspector` calls `setIsIsolated` when it triggers `isolateObjects`.
+ *   - `SelectionLabel` reads `isIsolated` to show/hide the "Show All" button.
+ *   - `IFCViewer`'s Escape handler calls `setIsIsolated(false)` when it resets.
+ *   - Any future toolbar or context menu can read the same value.
+ *
  * Architecture note on engine actions:
  *   Engine actions (zoom, isolate, camera views) are closures that reference
  *   the live ViewerEngine via engineRef.current in IFCViewer. They are
@@ -90,10 +104,24 @@ interface ViewerState {
   wireframeActive: boolean
 
   /**
+   * Whether the model is currently in isolate mode.
+   *
+   * TRUE  — One or more objects are isolated; all others are hidden.
+   * FALSE — All objects are visible (normal model state).
+   *
+   * Previously tracked as local useState in IFCInspector. Moved to the
+   * viewer store so SelectionLabel, IFCViewer's Escape handler, and any
+   * future UI element can observe and clear the isolation state without
+   * opening the Inspector panel.
+   *
+   * Writers: IFCInspector (when the Isolate/Show All button is clicked).
+   * Readers: SelectionLabel (shows "Show All" button), IFCViewer (Escape key).
+   */
+  isIsolated: boolean
+
+  /**
    * Zooms the camera to frame a single IFC object.
    * Set by IFCViewer in onSceneReady. null until the engine is ready.
-   *
-   * @param globalId - IFC object GlobalId to zoom to
    */
   zoomToObject: ((globalId: string) => void) | null
 
@@ -101,59 +129,54 @@ interface ViewerState {
    * Isolates one or more IFC objects (hides all others).
    * Passing an empty array restores full model visibility.
    * Set by IFCViewer in onSceneReady. null until the engine is ready.
-   *
-   * @param globalIds - Array of GlobalIds to isolate; [] = show all
    */
   isolateObjects: ((globalIds: string[]) => void) | null
 
-  /**
-   * Switches the camera to standard perspective projection.
-   * null until the engine is ready.
-   */
+  /** Switches the camera to standard perspective projection. */
   setCameraPerspective: (() => void) | null
 
-  /**
-   * Switches the camera to orthographic top-down (plan) view.
-   * null until the engine is ready.
-   */
+  /** Switches the camera to orthographic top-down (plan) view. */
   setCameraTop: (() => void) | null
 
-  /**
-   * Switches the camera to orthographic front (elevation) view.
-   * null until the engine is ready.
-   */
+  /** Switches the camera to orthographic front (elevation) view. */
   setCameraFront: (() => void) | null
 
-  /**
-   * Enables or disables wireframe overlay rendering.
-   * null until the engine is ready.
-   *
-   * @param enabled - true to enable wireframe, false to disable
-   */
+  /** Enables or disables wireframe overlay rendering. */
   setWireframe: ((enabled: boolean) => void) | null
 
   // ── Actions ──────────────────────────────────────────────
 
   /** Replaces the loaded IFC objects array. Called after IFC parsing completes. */
   setIFCObjects:       (objects: IFCObject[]) => void
-  /** Sets the spatial decomposition tree. Called after IFC parsing completes. */
+  /** Sets the spatial decomposition tree. */
   setSpatialTree:      (tree: IFCSpatialTree | null) => void
   /** Updates the model load state machine. */
   setModelLoadState:   (state: ModelLoadState) => void
-  /** Sets the error message (use with setModelLoadState('error')). */
+  /** Sets the error message. */
   setModelError:       (error: string | null) => void
-  /** Sets model file metadata for display in the header. */
+  /** Sets model file metadata. */
   setModelMeta:        (fileName: string, fileSize: number) => void
   /** Marks the Three.js scene as initialized. */
   setSceneReady:       (ready: boolean) => void
-  /** Updates the active camera view mode for button highlighting. */
+  /** Updates the active camera view mode. */
   setRenderMode:       (mode: RenderMode) => void
   /** Updates the wireframe active flag. */
   setWireframeActive:  (active: boolean) => void
 
   /**
+   * Sets the isolation state.
+   *
+   * Called by IFCInspector when isolateObjects() or isolateObjects([]) is
+   * triggered. Also called by IFCViewer's Escape handler when clearing all
+   * selection and isolation state at once.
+   *
+   * @param isolated - true when objects are isolated; false when all visible
+   */
+  setIsIsolated: (isolated: boolean) => void
+
+  /**
    * Registers the zoom and isolate action callbacks from the ViewerEngine.
-   * Called in IFCViewer's onSceneReady. Persists across model reloads.
+   * Called in IFCViewer's onSceneReady.
    */
   setEngineActions: (
     zoom:    (globalId: string) => void,
@@ -163,7 +186,6 @@ interface ViewerState {
   /**
    * Registers the camera view and wireframe callbacks from the ViewerEngine.
    * Called in IFCViewer's onSceneReady alongside setEngineActions.
-   * Persists across model reloads.
    */
   setCameraActions: (
     perspective: () => void,
@@ -175,27 +197,18 @@ interface ViewerState {
   /**
    * Clears all engine action callbacks.
    * Called ONLY in IFCViewer's useEffect cleanup (engine disposal).
-   * Never call this during model reloads — engine actions remain valid
-   * across model loads (the engine instance persists).
    */
   clearEngineActions: () => void
 
   /**
    * Resets model data back to the 'idle' state.
-   * Called when the user clicks "Load New Model" in the header.
-   *
-   * IMPORTANT: Does NOT clear engine action callbacks. The ViewerEngine
-   * instance is not disposed during a model reload — it continues to accept
-   * new models. Engine callbacks remain valid and must not be nulled here.
-   * See the comment in the implementation for the detailed reasoning.
+   * Also resets isIsolated since isolation is meaningless without a model.
+   * Does NOT clear engine action callbacks.
    */
   resetModel: () => void
 
   /**
    * Looks up a single IFC object by its GlobalId.
-   * Returns undefined if not found (model not loaded or object not extracted).
-   *
-   * @param globalId - IFC GlobalId to look up
    */
   getObjectByGlobalId: (globalId: string) => IFCObject | undefined
 }
@@ -212,6 +225,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   sceneReady:           false,
   renderMode:           'perspective',
   wireframeActive:      false,
+  isIsolated:           false,
   zoomToObject:         null,
   isolateObjects:       null,
   setCameraPerspective: null,
@@ -227,6 +241,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setSceneReady:     (ready)   => set({ sceneReady: ready }),
   setRenderMode:     (mode)    => set({ renderMode: mode }),
   setWireframeActive:(active)  => set({ wireframeActive: active }),
+  setIsIsolated:     (isolated) => set({ isIsolated: isolated }),
 
   setEngineActions: (zoom, isolate) => set({
     zoomToObject:   zoom,
@@ -252,6 +267,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   // ── resetModel ─────────────────────────────────────────────────────────────
   //
   // Resets ONLY model data and load state. Does NOT touch engine callbacks.
+  // Also resets isIsolated — isolation state is meaningless without a model.
   //
   // Background:
   //   The "Load New Model" flow (Layout → resetModel → upload → IFCViewer loads)
@@ -278,6 +294,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     modelFileSize:   null,
     renderMode:      'perspective',
     wireframeActive: false,
+    isIsolated:      false,
     // zoomToObject, isolateObjects, setCameraPerspective, setCameraTop,
     // setCameraFront, setWireframe — intentionally NOT reset here.
   }),

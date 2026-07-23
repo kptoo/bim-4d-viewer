@@ -1,3 +1,31 @@
+/**
+ * ExistingZonesPanel.tsx — Zone list with filter, isolate, rename, and delete actions.
+ *
+ * Phase 6 Zone UX fixes:
+ *
+ * 1. **Clear Filters buttons now also call `isolateObjects([])`.**
+ *    Previously, clicking "Clear Filters" in the panel header or the
+ *    `ezp-filter-bar` footer only called `clearFilters()`. This cleared the
+ *    filter chips but left the 3D viewport in its filtered (partially hidden)
+ *    state, because `isolateObjects([])` was never called. The user saw the
+ *    UI reset but the model stayed partially hidden — confusing.
+ *
+ * 2. **`handleIsolate` now also calls `toggleFilter(zoneId)` when isolating.**
+ *    When a user clicks "Isolate" on a zone, the model hides everything except
+ *    that zone's objects. Previously this was done entirely via `isolateObjects`
+ *    without touching `activeFilterIds`. So the ZoneFilterBar (which shows
+ *    active filters as chips) remained empty — giving no indication that a zone
+ *    was controlling visibility. Now `toggleFilter` is also called, which:
+ *    - Makes the ZoneFilterBar appear with the zone chip (visual feedback).
+ *    - Means clicking the chip's ✕ or "Clear all" correctly exits isolation too.
+ *    - Keeps filter state and visibility state in sync.
+ *
+ * 3. **`Esc` hints** added to the "Clear Filters" button matching the
+ *    object-selection UX convention, so users discover the keyboard shortcut.
+ *
+ * @module ExistingZonesPanel
+ */
+
 import { useState, useCallback, useRef } from 'react'
 import { useLayerStore }                  from '../../store/layer.store'
 import { useViewerStore }                 from '../../store/viewer.store'
@@ -20,10 +48,6 @@ function categoryMeta(category: string) {
 }
 
 // ── ZoneDetailPanel ───────────────────────────────────────────────────────────
-//
-// Shown when the user clicks a zone row.
-// Provides: filter, isolate, rename, delete.
-// No assignment controls here — those live in IFCInspector.
 
 interface ZoneDetailPanelProps {
   zone:           InformationLayer
@@ -186,10 +210,36 @@ export default function ExistingZonesPanel() {
     setSelectedZoneId(prev => prev === id ? null : id)
   }, [])
 
+  /**
+   * Isolate a zone: show only its objects in the 3D viewport AND activate
+   * the zone as a filter chip so the ZoneFilterBar appears and the user can
+   * see what is active and clear it from there.
+   *
+   * Phase 6 fix: previously only `isolateObjects` was called here, leaving
+   * `activeFilterIds` empty. Now `toggleFilter` is also called so that:
+   * - The ZoneFilterBar becomes visible (provides visual feedback).
+   * - Clicking the ZoneFilterBar's "Clear all" or the zone chip's ✕ exits
+   *   isolation — because both now call `clearFilters` + `isolateObjects([])`.
+   * - The panel header's "Clear Filters" button also appears and works.
+   *
+   * If the zone is already in `activeFilterIds` (was filtered before isolate),
+   * we don't toggle it twice — the guard prevents the chip from disappearing.
+   */
   const handleIsolate = useCallback((zoneId: string) => {
     if (!isolateObjects) return
-    isolateObjects(assignments.filter(a => a.layerId === zoneId).map(a => a.globalId))
-  }, [isolateObjects, assignments])
+
+    // Isolate in the 3D viewport
+    const globalIds = assignments
+      .filter(a => a.layerId === zoneId)
+      .map(a => a.globalId)
+    isolateObjects(globalIds)
+
+    // Also activate the filter chip if not already active, so the
+    // ZoneFilterBar appears and the user can clear it from there
+    if (!activeFilterIds.includes(zoneId)) {
+      toggleFilter(zoneId)
+    }
+  }, [isolateObjects, assignments, activeFilterIds, toggleFilter])
 
   const handleRename = useCallback((id: string, newName: string) => {
     renameMutation.mutate({ id, newName })
@@ -199,6 +249,18 @@ export default function ExistingZonesPanel() {
     deleteMutation.mutate(id)
     if (selectedZoneId === id) setSelectedZoneId(null)
   }, [deleteMutation, selectedZoneId])
+
+  /**
+   * Full reset: clear the filter store AND restore 3D visibility.
+   *
+   * Phase 6 fix: previously this only called `clearFilters()` without
+   * `isolateObjects([])`. Objects hidden by "Isolate" stayed hidden even
+   * after the filter chips disappeared. Now both are always called together.
+   */
+  const handleClearAll = useCallback(() => {
+    clearFilters()
+    isolateObjects?.([])
+  }, [clearFilters, isolateObjects])
 
   return (
     <div className="ezp-panel">
@@ -213,8 +275,8 @@ export default function ExistingZonesPanel() {
           {activeFilterIds.length > 0 && (
             <button
               className="ezp-panel__clear-btn"
-              onClick={clearFilters}
-              title="Clear all filters"
+              onClick={handleClearAll}
+              title="Clear all zone filters and restore full model visibility (Escape)"
             >
               Clear Filters ({activeFilterIds.length})
             </button>
@@ -222,12 +284,7 @@ export default function ExistingZonesPanel() {
         </div>
       </div>
 
-      {/*
-        ── Contextual hint ────────────────────────────────────────────────────
-        Replaces the old SelectionSummary + assignment controls.
-        Directs users to Inspector for assignment — one clear sentence is
-        enough; the Inspector tab is always visible in the panel header.
-      */}
+      {/* ── Contextual hint ──────────────────────────────────── */}
       <div className="ezp-panel__hint">
         <span className="ezp-panel__hint-icon">💡</span>
         <span>
@@ -290,7 +347,23 @@ export default function ExistingZonesPanel() {
       {activeFilterIds.length > 0 && (
         <div className="ezp-filter-bar">
           🔍 {activeFilterIds.length} zone filter{activeFilterIds.length !== 1 ? 's' : ''} active
-          <button className="ezp-filter-bar__clear" onClick={clearFilters}>Clear</button>
+          <button
+            className="ezp-filter-bar__clear"
+            onClick={handleClearAll}
+            title="Clear all zone filters and restore full model (Escape)"
+          >
+            Clear
+          </button>
+          <kbd style={{
+            background:    'rgba(255,255,255,0.07)',
+            border:        '1px solid rgba(255,255,255,0.15)',
+            borderRadius:  3,
+            fontSize:      9,
+            marginLeft:    4,
+            padding:       '1px 4px',
+            color:         'var(--text-secondary)',
+            fontFamily:    'ui-monospace, monospace',
+          }}>Esc</kbd>
         </div>
       )}
 

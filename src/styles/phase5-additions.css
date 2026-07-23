@@ -112,3 +112,19 @@
   padding:      16px;
   text-align:   center;
 }
+/* Project date range labels — replaces the static month abbreviations.
+   Sit directly below the slider track, flush to each end.               */
+.timeline-date-range {
+  display:         flex;
+  justify-content: space-between;
+  margin-top:      4px;
+  padding:         0 2px;
+}
+
+.timeline-date-range__start,
+.timeline-date-range__end {
+  font-size:   9px;
+  color:       var(--text-secondary);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}

@@ -1,3 +1,25 @@
+/**
+ * IFCViewer.tsx — 3D IFC model viewer component.
+ *
+ * Hosts the ViewerEngine instance and bridges it to the React/Zustand
+ * application layer via a set of carefully scoped useEffect hooks.
+ *
+ * Phase 6 Zone UX change (this iteration):
+ * - Effect 5 (Escape key handler) now also calls `clearFilters()` from
+ *   layer.store, so pressing Escape clears ALL active state in one keystroke:
+ *     1. clearSelection()       → deselects the highlighted IFC object
+ *     2. isolateObjects([])     → restores visibility of all hidden objects
+ *     3. setIsIsolated(false)   → clears the object isolation flag
+ *     4. clearFilters()         → clears all active zone filters
+ *     5. engine.resetColors()   → removes colour overrides
+ *
+ *   This creates a unified "reset everything" shortcut consistent with
+ *   professional BIM applications. The user never needs to wonder which
+ *   specific panel to open to get back to the full model.
+ *
+ * @module IFCViewer
+ */
+
 import { useEffect, useRef } from 'react'
 import { ViewerEngine }        from '../viewer/ViewerEngine'
 import { useViewerStore }      from '../store/viewer.store'
@@ -10,7 +32,6 @@ import { FilterEngine }        from '../core/filter/FilterEngine'
 import IFCUploadZone           from '../features/viewer/IFCUploadZone'
 import SelectionLabel          from './SelectionLabel'
 import { useAllAssignments, useGlobalIdLayerMap } from '../hooks/useAssignments'
-import { useActivities, useGlobalIdActivityMap }  from '../hooks/useActivities'
 
 export default function IFCViewer() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -27,6 +48,7 @@ export default function IFCViewer() {
   const setEngineActions    = useViewerStore(s => s.setEngineActions)
   const setCameraActions    = useViewerStore(s => s.setCameraActions)
   const clearEngineActions  = useViewerStore(s => s.clearEngineActions)
+  const setIsIsolated       = useViewerStore(s => s.setIsIsolated)
 
   const zoomToObject    = useViewerStore(s => s.zoomToObject)
   const isolateObjects  = useViewerStore(s => s.isolateObjects)
@@ -43,17 +65,11 @@ export default function IFCViewer() {
   const addError           = useUIStore(s => s.addError)
 
   const activeFilterIds    = useLayerStore(s => s.activeFilterIds)
+  const clearFilters       = useLayerStore(s => s.clearFilters)
 
-  // ── Phase 3: Bootstrap DB data — layers ──────────────────
-  // React Query deduplicates: subscribing here doesn't fire extra requests.
+  // ── Phase 3: Bootstrap DB data ───────────────────────────
   useAllAssignments()
   useGlobalIdLayerMap()
-
-  // ── Phase 4: Bootstrap DB data — activities ──────────────
-  // useActivities fetches all activities and syncs to activity store.
-  // useGlobalIdActivityMap patches IFCObject.activityIds for FilterEngine.
-  useActivities()
-  useGlobalIdActivityMap()
 
   // ── Init ViewerEngine once ───────────────────────────────
   useEffect(() => {
@@ -281,39 +297,10 @@ export default function IFCViewer() {
   }, [activeFilterIds, ifcObjects, modelLoadState])
 
   // ── Effect 4: Wireframe selection reveal (programmatic path) ──
-  //
-  // ARCHITECTURE — TWO PATHS FOR WIREFRAME SELECTION REVEAL
-  // ─────────────────────────────────────────────────────────
-  //
-  // PATH 1 — 3D click (handled in ViewerEngine.handleClick):
-  //   The raycast result already contains the localId of the clicked element.
-  //   ViewerEngine calls setWireframeSelection() synchronously, before
-  //   onObjectPicked() fires. This bypasses React scheduling entirely.
-  //   No store reads, no async waits, no Effect 4 needed.
-  //
-  // PATH 2 — Programmatic selection (Gantt, Object Tree, this effect):
-  //   Selection originates outside the 3D scene. The engine doesn't know about
-  //   it until the store updates and this effect fires. We call
-  //   engine.updateWireframeSelection(globalIds) which resolves to localIds
-  //   and calls setWireframeSelection internally.
-  //
-  // WHY WE CHECK engine.isWireframeEnabled() INSTEAD OF wireframeActive:
-  //   wireframeActive in viewer.store is the UI state (set by Layout.tsx button).
-  //   engine.isWireframeEnabled() is the engine's actual rendering state.
-  //   These should always agree, but if viewer.store.ts wasn't updated with
-  //   wireframeActive (original codebase doesn't have it), wireframeActive
-  //   would be undefined → always falsy → Effect 4 exits silently every time.
-  //   Checking the engine directly is robust regardless of store version.
-  //
-  // NOTE: For clicks, Path 1 already handled the reveal. This effect running
-  // again is a no-op because updateWireframeSelection() will resolve the same
-  // GlobalIds to the same localIds already revealed by Path 1.
-
   useEffect(() => {
     const engine = engineRef.current
     if (!engine || modelLoadState !== 'loaded') return
 
-    // Query the engine's actual state — robust against store version mismatches
     if (!engine.isWireframeEnabled()) return
 
     const globalIds = Array.from(selectedGlobalIds)
@@ -323,18 +310,73 @@ export default function IFCViewer() {
       `selectedGlobalIds: [${globalIds.slice(0, 3).join(', ')}${globalIds.length > 3 ? '…' : ''}]`
     )
 
-    // updateWireframeSelection handles empty array → clear reveal
     engine.updateWireframeSelection(globalIds).catch(console.warn)
 
   }, [
     selectedGlobalIds,
     primaryGlobalId,
     modelLoadState,
-    // wireframeActive intentionally omitted — we check engine.isWireframeEnabled()
-    // directly to avoid dependency on store version. The effect still fires on
-    // selection changes regardless of wireframe state; the guard inside
-    // engine.isWireframeEnabled() exits cleanly when wireframe is off.
   ])
+
+  // ── Effect 5: Escape key — unified "return to full model" ──
+  //
+  // Escape is the universal "get me out of every active state" shortcut in
+  // professional BIM applications (Navisworks, Revit, Solibri, ACC).
+  //
+  // This handler clears ALL active view-modifying state in one keystroke:
+  //   1. clearSelection()    → deselects highlighted IFC objects
+  //   2. isolateObjects([])  → restores visibility of objects hidden by Isolate
+  //   3. setIsIsolated(false)→ clears the object isolation flag
+  //   4. clearFilters()      → clears ALL active zone filters (layer.store)
+  //                            Effect 3 reacts to activeFilterIds becoming []
+  //                            and calls engine.restoreVisibility() automatically
+  //   5. resetColors()       → removes all colour overrides from the viewer
+  //
+  // Zone filter reset via Escape:
+  //   clearFilters() sets activeFilterIds = [] in layer.store.
+  //   IFCViewer's Effect 3 watches activeFilterIds and calls
+  //   engine.restoreVisibility() whenever it becomes empty — so no direct
+  //   engine call is needed here for the filter reset; it happens reactively.
+  //
+  // The listener attaches to `document` so it fires regardless of focus.
+  // The input-element guard prevents interference with rename fields and
+  // form inputs inside the Zone panels.
+
+  useEffect(() => {
+    if (modelLoadState !== 'loaded') return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+
+      const target = e.target as HTMLElement
+      if (
+        target.tagName === 'INPUT'    ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT'   ||
+        target.isContentEditable
+      ) return
+
+      console.log('[IFCViewer] Escape — clearing selection, isolation, and zone filters')
+
+      // 1. Clear object selection
+      clearSelection()
+
+      // 2. Exit object isolation
+      const { isolateObjects: iso, setIsIsolated: setIso } = useViewerStore.getState()
+      if (iso) iso([])
+      setIso(false)
+
+      // 3. Clear zone filters — Effect 3 handles restoreVisibility reactively
+      clearFilters()
+
+      // 4. Remove colour overrides
+      engineRef.current?.resetColors()
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+
+  }, [modelLoadState, clearSelection, setIsIsolated, clearFilters])
 
   // ── Stats counts ─────────────────────────────────────────
   const frames = computeAllFrames(activities)
